@@ -76,13 +76,18 @@ def between_within(streams: dict[str, list[list[str]]], level: str = "freq",
         D[i][j] = D[j][i] = dist(items[i][1], items[j][1])
     labels = [lbl for lbl, _ in items]
 
-    def ratio(labs: list[str]) -> float:
+    def ratio(labs: list[str]) -> tuple[float, float, float]:
         wi = [D[i][j] for i, j in itertools.combinations(range(n), 2) if labs[i] == labs[j]]
         bw = [D[i][j] for i, j in itertools.combinations(range(n), 2) if labs[i] != labs[j]]
         mw = sum(wi) / len(wi) if wi else 1e-9
         mb = sum(bw) / len(bw) if bw else 0.0
         return (mb / mw) if mw else 0.0, mw, mb
 
+    if all(len(ss) < 2 for ss in streams.values()):
+        raise ValueError(
+            "between_within needs at least one label with 2+ streams: with a single stream "
+            "per label there are no within-label pairs and R is undefined"
+        )
     r_obs, mw, mb = ratio(labels)
     rng = random.Random(seed)
     hits = 0

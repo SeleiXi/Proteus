@@ -1,2 +1,2 @@
-"""Proteus — a harness-agnostic driver for measuring agent self-evolution."""
+"""Proteus — a harness-agnostic framework for agent self-evolution."""
 __version__ = "0.1.0"

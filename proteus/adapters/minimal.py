@@ -3,12 +3,12 @@
 This harness is deliberately tiny: two surfaces (`notes`, `tools`), a four-phase loop, and
 a pluggable policy. It exists to (a) let the whole framework run end-to-end with no API key
 and no Docker, so tests and demos work offline, and (b) demonstrate that a harness with
-*its own* surface set plugs in with no change to the driver or the measurement layer.
+*its own* surface set plugs in with no change to the framework or the measurement layer.
 
 The default `MockPolicy` is deterministic and biases its writes toward whichever surface the
 installed disposition names, so even offline a `review_notes` run diverges from `neutral` in
-a way the distance instrument can measure. Swap in `OpenAIPolicy` (needs `openai` + a key)
-to run a real LLM agent instead.
+a way the distance instrument can measure. `proteus.adapters.llm.LLMHarness` is the same
+harness driven by a live model instead of the mock policy.
 """
 
 from __future__ import annotations

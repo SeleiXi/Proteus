@@ -31,6 +31,27 @@ class SandboxConfig:
     env_passthrough: tuple[str, ...] = ()            # env var names to forward (e.g. API keys)
     entrypoint: tuple[str, ...] = ()      # override; adapter usually supplies the command
 
+    @classmethod
+    def from_manifest(cls, path: Path) -> "SandboxConfig":
+        """Load the `[environment]` table of an `environments/<name>/environment.toml`.
+
+        `docker_image` (a registry ref) takes precedence over `image` (the local tag the
+        directory's Dockerfile builds) — the same short-circuit Harbor's task config uses,
+        so one manifest serves both the prebuilt and the build-it-yourself path.
+        """
+        try:
+            import tomllib
+        except ImportError:  # Python 3.10
+            import tomli as tomllib  # type: ignore[no-redef]
+        env = tomllib.loads(Path(path).read_text(encoding="utf-8"))["environment"]
+        return cls(
+            network=env.get("network", "none"),
+            image=env.get("docker_image") or env.get("image", "proteus-episode:latest"),
+            mem_limit=str(env.get("memory", "")),
+            cpus=str(env.get("cpus", "")) if env.get("cpus") else "",
+            env_passthrough=tuple(env.get("env_passthrough", ())),
+        )
+
 
 class Sandbox(Protocol):
     def run(self, run_root: Path, command: list[str], env: Mapping[str, str],

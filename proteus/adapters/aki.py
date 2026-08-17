@@ -21,7 +21,7 @@ Known limits, stated rather than papered over:
   injected into the episode yet; no-goal runs — the paper's primary regime — are fully
   supported, goal-text injection into Aki episodes is not wired.
 - Aki couples seeding and disposition install in one `init_run`, so this adapter performs
-  both inside `install_disposition` (the driver calls `seed` first; it only records state).
+  both inside `install_disposition` (the framework calls `seed` first; it only records state).
 """
 
 from __future__ import annotations
@@ -131,7 +131,7 @@ class AkiHarness:
         config = RunConfig(
             condition=Condition(None, None, label=arm),
             seed=int(os.environ.get("PROTEUS_AKI_SEED", "0")),
-            episodes=1,  # the Proteus driver owns the loop; per-call episode below
+            episodes=1,  # the Proteus framework owns the loop; per-call episode below
             root=run_root,
         )
         if not harness_root.exists():

@@ -1,0 +1,13 @@
+# OpenHands (https://github.com/All-Hands-AI/OpenHands). Manifest prepared against the
+# official runtime image; the Proteus adapter for it is not written yet.
+[environment]
+name = "openhands"
+docker_image = "docker.all-hands.dev/all-hands-ai/openhands:0.53"
+network = "host"
+memory = "4g"
+cpus = 2.0
+env_passthrough = ["LLM_API_KEY"]
+
+[harness]
+adapter = ""  # roadmap
+workspace_mount = "/workspace"

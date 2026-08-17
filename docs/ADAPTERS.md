@@ -1,7 +1,7 @@
 # Writing a Harness Adapter
 
 An adapter is how *your* harness plugs into Proteus. It is one class implementing
-`proteus.core.HarnessAdapter`. Once it exists, the driver, sandbox, and the whole
+`proteus.core.HarnessAdapter`. Once it exists, the framework, sandbox, and the whole
 measurement suite work on your harness unchanged. `proteus/adapters/minimal.py` is a
 complete ~120-line reference; this is the guide.
 
@@ -48,7 +48,7 @@ your harness:
 It **must be removable** — crystallization reads the harness back with `NEUTRAL` installed.
 
 ### 4. Run one episode, emit a normalized trace
-`run_episode(spec)` executes the four phases using `spec.phase_prompts` (the driver has
+`run_episode(spec)` executes the four phases using `spec.phase_prompts` (the framework has
 already folded in the goal text and any visible evaluator feedback). Write the harness files
 the agent edits, and record each step as an `ActionEvent`. Return an `EpisodeResult`;
 results flow through the trace, not stdout.

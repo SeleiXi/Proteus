@@ -1,0 +1,13 @@
+# SWE-agent (https://github.com/SWE-agent/SWE-agent). Manifest prepared against the
+# official image; the Proteus adapter for it is not written yet.
+[environment]
+name = "swe-agent"
+docker_image = "sweagent/swe-agent:1.1.0"
+network = "host"
+memory = "4g"
+cpus = 2.0
+env_passthrough = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+
+[harness]
+adapter = ""  # roadmap
+workspace_mount = "/workspace"

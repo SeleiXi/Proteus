@@ -1,0 +1,13 @@
+# Aki research harness. The image is assembled from the (private) research checkout by its
+# own scrubbing pipeline; this manifest declares how episodes run once it exists.
+[environment]
+name = "aki"
+image = "aki-episode:latest"
+network = "host"
+memory = "4g"
+cpus = 2.0
+env_passthrough = ["DEEPSEEK_KEY"]
+
+[harness]
+adapter = "aki"
+workspace_mount = "/run"

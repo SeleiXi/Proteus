@@ -11,7 +11,7 @@ identity" apart from "the identity is the one we planted":
       the installed disposition pointed? (the identity is the planted one)
 
 This module provides the mounting + the two statistics; it drives probe episodes through
-the same adapter + episode driver as evolution, so a swap is measured with the same ruler.
+the same adapter + episode loop as evolution, so a swap is measured with the same ruler.
 """
 
 from __future__ import annotations

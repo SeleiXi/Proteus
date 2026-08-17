@@ -1,15 +1,15 @@
-"""The self-evolution driver: run a harness for N context-fresh episodes and record its
+"""The self-evolution loop: run a harness for N context-fresh episodes and record its
 trajectory.
 
 One episode is four phases — **observe → propose → act → reflect** — context-fresh each
-time; only files cross the episode boundary. The driver owns everything that is *not* the
+time; only files cross the episode boundary. The framework owns everything that is *not* the
 harness: it builds each phase's prompt (folding in the goal text and any evaluator feedback
 the agent is allowed to see), asks the adapter to run the episode, snapshots the working
 tree, runs the evaluators, and applies the outer-loop selection if one is configured. The
 adapter owns everything that *is* the harness (how the four phases actually execute).
 
 This separation is what makes Proteus harness-agnostic and condition-complete at once: the
-same driver runs Aki or a bare ReAct loop, under no-goal or multi-goal, with evaluators
+same framework runs Aki or a bare ReAct loop, under no-goal or multi-goal, with evaluators
 hidden or visible, and the measurement layer reads all of it with one ruler.
 """
 

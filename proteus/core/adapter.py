@@ -5,7 +5,7 @@ any specific harness (Aki, OpenHands, SWE-agent, your own loop); it talks only t
 `HarnessAdapter`. A harness ships one adapter and Proteus can then evolve it, measure it,
 and swap dispositions in and out of it uniformly.
 
-The three things a self-evolution driver needs from a harness, and none of the existing
+The three things a self-evolution framework needs from a harness, and none of the existing
 agent frameworks expose together, are declared here:
 
   1. its persistent, editable **surfaces** (memory / skills / tools / code / ...), as data
@@ -70,7 +70,7 @@ class EpisodeSpec:
     episode: int                     # 1-based
     model: str                       # model id the harness should use
     phase_prompts: Mapping[str, str] # observe/propose/act/reflect texts (goal + evaluator
-                                     # feedback already merged in by the episode driver)
+                                     # feedback already merged in by the framework)
     max_turns: int = 100
     extra_env: Mapping[str, str] = field(default_factory=dict)
 

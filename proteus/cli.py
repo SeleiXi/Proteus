@@ -25,10 +25,16 @@ def _adapter_factory(name: str):
     if name == "minimal":
         from proteus.adapters.minimal import MinimalHarness
         return MinimalHarness
+    if name == "llm":
+        from proteus.adapters.llm import LLMHarness
+        return LLMHarness
+    if name == "dsh":
+        from proteus.adapters.dsh import DshHarness
+        return DshHarness
     if name == "aki":
         from proteus.adapters.aki import AkiHarness
         return AkiHarness
-    raise SystemExit(f"unknown harness {name!r} (have: minimal, aki)")
+    raise SystemExit(f"unknown harness {name!r} (have: minimal, llm, dsh, aki)")
 
 
 def _arm(spec: str):
@@ -96,9 +102,12 @@ def cmd_measure(args) -> int:
         print(f"{arm:<16}{len(arm_streams[arm]):>6}{row}")
 
     if len(arm_streams) > 1:
-        r = stream.between_within(dict(arm_streams), level="freq", permutations=2000)
-        print(f"\nbehavioural R (between/within arms, last episode): "
-              f"{r['R']:.3f}  p={r['p']:.4f}")
+        if any(len(v) >= 2 for v in arm_streams.values()):
+            r = stream.between_within(dict(arm_streams), level="freq", permutations=2000)
+            print(f"\nbehavioural R (between/within arms, last episode): "
+                  f"{r['R']:.3f}  p={r['p']:.4f}")
+        else:
+            print("\nbehavioural R: not computed (needs 2+ seeds per arm)")
     return 0
 
 
@@ -114,7 +123,8 @@ def main(argv=None) -> int:
     r.add_argument("--seeds", type=int, default=4)
     r.add_argument("--episodes", type=int, default=10)
     r.add_argument("--max-turns", type=int, default=100)
-    r.add_argument("--model", default="mock")
+    r.add_argument("--model", default="",
+                   help="model name; empty uses the adapter's default")
     r.add_argument("--out", required=True)
     r.set_defaults(func=cmd_run)
 

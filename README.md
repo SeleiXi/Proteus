@@ -1,6 +1,6 @@
 # Proteus
 
-**A harness-agnostic driver for measuring agent self-evolution.**
+**A harness-agnostic self-evolution framework for AI agents.**
 
 Plug in *any* agent harness × *any* model, let it rewrite its own harness over many
 context-fresh episodes, and measure **how the harness changes** — under a goal, many goals,
@@ -22,7 +22,7 @@ Three things set it apart from every existing harness-evolution system:
 
 1. **Harness-agnostic.** Others evolve harnesses built from their *own* primitives. Proteus
    evolves *yours*: implement one small `HarnessAdapter` and your agent — Aki (default), a
-   bare ReAct loop, or your own — plugs into the same driver, sandbox, and measurement.
+   bare ReAct loop, or your own — plugs into the same framework, sandbox, and measurement.
 2. **Goal *and* no-goal, with visible or hidden evaluators.** Others hard-code a single
    regime: one benchmark verifier, agent blind to the score, goal mandatory. Proteus spans
    the space — `no-goal | one goal | many goals`, and evaluators that the agent either
@@ -37,9 +37,22 @@ Three things set it apart from every existing harness-evolution system:
 ## Install
 
 ```bash
-pip install -e .            # core is dependency-free
-pip install -e '.[llm]'     # add a real-LLM policy (openai)
+pip install -e .            # dependency-free: even the live-LLM harness runs on stdlib
 ```
+
+## Harnesses in the box
+
+| adapter | what it is | needs |
+|---|---|---|
+| `minimal` | offline reference harness (mock policy) | nothing |
+| `llm` | the same harness driven by a live model — any OpenAI-compatible endpoint, DeepSeek by default | an API key |
+| `dsh` | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), headless profile, in a prepared container | Docker + a DeepSeek key |
+| `aki` | the Aki research harness (the paper's apparatus) | the research checkout |
+
+`dsh` is the template for third-party integrations: no harness code modified — the adapter
+seeds a workspace, launches the prepared container per phase, and reads the session logs
+back. Its disposition installs as a removable block in `AGENTS.md`, which dsh reads
+natively.
 
 ## 60-second demo (no API key, no Docker)
 
@@ -80,7 +93,7 @@ observe  →  propose  →  act  →  reflect
 - **act** — carry one out by editing the harness (the goal, if any, is announced here).
 - **reflect** — decide what to keep.
 
-The **driver** owns everything that is not the harness (prompts, goal text, evaluator
+The **framework** owns everything that is not the harness (prompts, goal text, evaluator
 routing, snapshotting, measurement). The **adapter** owns everything that is (how the four
 phases actually execute). That split is what makes Proteus harness-agnostic.
 
@@ -134,11 +147,19 @@ A self-editing agent writes and runs its own code, so an application-level file 
 cannot contain it — Proteus runs real harnesses in a container whose filesystem holds the
 harness and nothing else.
 
+### Prepared environments
+
+`environments/` ships one pinned Docker environment per supported harness — a `Dockerfile`
+plus an `environment.toml` manifest (`SandboxConfig.from_manifest` loads it). The evolving
+workspace is always a mount, never baked into the image, so one image serves every
+condition and seed. `environments/README.md` has the conventions; `docs/ENVIRONMENTS.md`
+records the design survey behind them.
+
 ## Plug in your own harness
 
 Implement `HarnessAdapter` (see `proteus/adapters/minimal.py` for a ~120-line reference and
 `docs/ADAPTERS.md` for the guide). Declare your surfaces, run one episode, emit a normalized
-action trace, and install a removable disposition. That's it — the driver, sandbox, and the
+action trace, and install a removable disposition. That's it — the framework, sandbox, and the
 entire measurement suite work unchanged.
 
 ## Measurement
@@ -155,14 +176,14 @@ from proteus.measure import distance, stream, crystallize
 
 ## Status
 
-`v0.1`. The `minimal` harness and the full measurement suite work offline. The `aki`
-adapter's **measure path** (trace parsing, disposition fingerprint) is pure-Python and reads
-existing Aki run roots with no checkout; its **run path** drives the containerized Aki
-research runner (set `AKI_HARNESS_SRC`). As a cross-implementation check, Proteus's
-behavioural ruler applied to the research runs independently reproduces their headline
-dynamics: arms separate at episode 1 (R = 1.63) and converge by episode 30 (R = 0.93).
-Proteus is the open framework behind our paper on action preference as an initial condition
-for self-improving agents.
+`v0.1`. Working today: the offline `minimal` harness with the full measurement suite; the
+`llm` harness live against DeepSeek; the `dsh` adapter running DeepSeek Harness headless
+episodes in its prepared container; and the `aki` adapter — measure path reads existing
+research runs with no checkout, run path drives the containerized research runner. As a
+cross-implementation check, Proteus's behavioural ruler applied to the research runs
+independently reproduces their headline dynamics: arms separate at episode 1 (R = 1.63) and
+converge by episode 30 (R = 0.93). Proteus is the open framework behind our paper on action
+preference as an initial condition for self-improving agents.
 
 ## License
 
