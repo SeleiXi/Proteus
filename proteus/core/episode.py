@@ -79,7 +79,7 @@ def _phase_prompts(cfg: RunConfig, prior_feedback: str) -> dict[str, str]:
 def run(cfg: RunConfig) -> RunResult:
     """Run one seed's full trajectory, harness retained under `cfg.root`."""
     harness = cfg.root / "harness"
-    cfg.adapter.seed(harness)
+    cfg.adapter.seed(harness, cfg.seed)
     cfg.adapter.install_disposition(harness, cfg.disposition)
     snapshot.init(harness)
 
@@ -87,11 +87,13 @@ def run(cfg: RunConfig) -> RunResult:
     prior_feedback = ""
     error = ""
     done = 0
+    last_accepted = snapshot.head(harness)   # episode-0 state
+    best_score: float | None = None
     for ep in range(1, cfg.episodes + 1):
         spec = EpisodeSpec(
             root=cfg.root, episode=ep, model=cfg.model,
             phase_prompts=_phase_prompts(cfg, prior_feedback),
-            max_turns=cfg.max_turns,
+            max_turns=cfg.max_turns, seed=cfg.seed,
         )
         try:
             res = cfg.adapter.run_episode(spec)
@@ -101,21 +103,36 @@ def run(cfg: RunConfig) -> RunResult:
         if not res.ok:
             error = res.error
             break
-        snapshot.commit(harness, f"episode {ep}: {cfg.name}")
-        done = ep
 
-        # evaluate; route results by visibility
+        # evaluate the episode BEFORE snapshotting, so selection can still reject it
         trace = cfg.adapter.read_trace(cfg.root, ep)
         results = cfg.goal.evaluate(trace, GoalContext(str(harness), ep))
         by_name = {r.name: r for r in results}
-        eval_history.append({"episode": ep, "results": [r.__dict__ for r in results]})
-        prior_feedback = cfg.goal.observe_feedback(by_name)  # OBSERVE-visible only
 
-        # outer-loop selection on HIDDEN scores (accept/reject the episode's edits)
+        # outer-loop selection on the scores (visibility-independent: an outer loop may
+        # act on scores the agent itself never sees)
+        accepted = True
         if cfg.goal.selection == "accept_reject" and results:
-            worst = min(r.score for r in results)
-            # a real policy would compare to best-so-far; the hook is here for goal runs.
-            _ = worst
+            score = sum(r.score for r in results) / len(results)
+            if best_score is not None and score < best_score:
+                accepted = False
+            else:
+                best_score = score
+
+        if accepted:
+            last_accepted = snapshot.commit(harness, f"episode {ep}: {cfg.name}")
+        else:
+            # discard the episode's edits; commit the restored tree so the
+            # episode -> commit mapping stays gapless
+            snapshot.restore(harness, last_accepted)
+            snapshot.commit(harness, f"episode {ep}: {cfg.name} [rejected]")
+        done = ep
+
+        eval_history.append({"episode": ep, "accepted": accepted,
+                             "results": [r.__dict__ for r in results]})
+        prior_feedback = cfg.goal.observe_feedback(by_name)  # OBSERVE-visible only
+        if prior_feedback and not accepted:
+            prior_feedback += "\n(Your last episode's changes were not kept.)"
 
     (cfg.root / "eval_history.json").write_text(json.dumps(eval_history, indent=1))
     return RunResult(name=cfg.name, episodes_complete=done, root=str(cfg.root),

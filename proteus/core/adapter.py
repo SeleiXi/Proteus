@@ -72,6 +72,7 @@ class EpisodeSpec:
     phase_prompts: Mapping[str, str] # observe/propose/act/reflect texts (goal + evaluator
                                      # feedback already merged in by the framework)
     max_turns: int = 100
+    seed: int = 0                    # the run's RNG seed (condition replicate index)
     extra_env: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -91,8 +92,10 @@ class HarnessAdapter(Protocol):
         ...
 
     # --- provisioning -------------------------------------------------------------------
-    def seed(self, harness_root: Path) -> None:
-        """Materialise a fresh copy of the harness into `harness_root` (episode 0 state)."""
+    def seed(self, harness_root: Path, rng_seed: int = 0) -> None:
+        """Materialise a fresh copy of the harness into `harness_root` (episode 0 state).
+        `rng_seed` is the run's replicate index, available to harnesses that need it at
+        provisioning time (e.g. for deterministic per-seed naming)."""
         ...
 
     def install_disposition(self, harness_root: Path, disposition: "Disposition") -> None:

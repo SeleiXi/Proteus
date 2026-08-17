@@ -75,6 +75,24 @@ def cmd_run(args) -> int:
     return 0
 
 
+def _travel(run_root: Path, episodes: int, surfaces) -> dict:
+    """Materialise every episode state from the snapshot chain and sum path length."""
+    import tempfile
+    from proteus.core import snapshot
+    from proteus.measure import distance
+    work = run_root / "harness"
+    states = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for ep in range(0, episodes + 1):
+            sha = snapshot.commit_for_episode(work, ep)
+            if sha is None:
+                continue
+            dest = Path(tmp) / f"s{ep}"
+            snapshot.materialize(work, sha, dest)
+            states.append(dest)
+        return distance.path_length(states, surfaces)
+
+
 def cmd_measure(args) -> int:
     import statistics as st
     from collections import defaultdict
@@ -87,6 +105,7 @@ def cmd_measure(args) -> int:
     # structural: per-arm, per-surface final unit counts (what got built)
     arm_surface = defaultdict(lambda: defaultdict(list))
     arm_streams = defaultdict(list)
+    arm_travel = defaultdict(lambda: defaultdict(list))
     for rec in records:
         work = Path(rec["root"]) / "harness"
         final = distance.units(work, surfaces)
@@ -94,12 +113,23 @@ def cmd_measure(args) -> int:
             arm_surface[rec["arm"]][sname].append(len(u))
         last = adapter.read_trace(Path(rec["root"]), rec["episodes_complete"])
         arm_streams[rec["arm"]].append(stream.tool_stream(last))
+        if args.travel:
+            pl = _travel(Path(rec["root"]), rec["episodes_complete"], surfaces)
+            for sname, d in pl.items():
+                arm_travel[rec["arm"]][sname].append(d.added + d.dropped + d.revised)
 
     names = [s.name for s in surfaces]
     print(f"{'arm':<16}{'seeds':>6}" + "".join(f"{n:>12}" for n in names) + "   (mean units built)")
     for arm in arm_surface:
         row = "".join(f"{st.mean(arm_surface[arm][n]):>12.1f}" for n in names)
         print(f"{arm:<16}{len(arm_streams[arm]):>6}{row}")
+
+    if args.travel and arm_travel:
+        print(f"\n{'arm':<16}{'':>6}" + "".join(f"{n:>12}" for n in names)
+              + "   (mean travel: units added+dropped+revised along the path)")
+        for arm in arm_travel:
+            row = "".join(f"{st.mean(arm_travel[arm][n]):>12.1f}" for n in names)
+            print(f"{arm:<16}{'':>6}{row}")
 
     if len(arm_streams) > 1:
         if any(len(v) >= 2 for v in arm_streams.values()):
@@ -131,6 +161,8 @@ def main(argv=None) -> int:
     m = sub.add_parser("measure", help="measure a finished sweep")
     m.add_argument("--harness", default="minimal")
     m.add_argument("--out", required=True)
+    m.add_argument("--travel", action="store_true",
+                   help="also compute per-surface path length over episode snapshots")
     m.set_defaults(func=cmd_measure)
 
     args = ap.parse_args(argv)

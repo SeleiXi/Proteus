@@ -70,6 +70,17 @@ def commit_for_episode(work_tree: Path, episode: int) -> str | None:
     return None
 
 
+def restore(work_tree: Path, sha: str) -> None:
+    """Reset the working tree to `sha`, discarding everything after it.
+
+    Used by accept/reject selection: a rejected episode's edits are removed and the tree
+    returns to the last accepted state. `reset --hard` restores tracked content; `clean
+    -fd` removes files the rejected episode added (untracked relative to `sha`).
+    """
+    _git(work_tree, "reset", "--hard", sha)
+    _git(work_tree, "clean", "-fd")
+
+
 def materialize(work_tree: Path, sha: str, dest: Path) -> None:
     """Extract the tree at `sha` into `dest` (a fresh harness dir at a past state)."""
     git_dir = work_tree.parent / ".snapshot.git"

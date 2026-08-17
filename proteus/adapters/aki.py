@@ -115,9 +115,10 @@ class AkiHarness:
                 "via Disposition.config['AKI_ARM']"
             ) from None
 
-    def seed(self, harness_root: Path) -> None:
-        # Aki's init_run seeds and installs in one step; remember the root until then.
+    def seed(self, harness_root: Path, rng_seed: int = 0) -> None:
+        # Aki's init_run seeds and installs in one step; remember state until then.
         self._pending_root = harness_root
+        self._rng_seed = rng_seed
 
     def install_disposition(self, harness_root: Path, disposition: Disposition) -> None:
         grid, supervisor, Condition, RunConfig = self._api()
@@ -130,7 +131,7 @@ class AkiHarness:
         run_root = harness_root.parent
         config = RunConfig(
             condition=Condition(None, None, label=arm),
-            seed=int(os.environ.get("PROTEUS_AKI_SEED", "0")),
+            seed=getattr(self, "_rng_seed", int(os.environ.get("PROTEUS_AKI_SEED", "0"))),
             episodes=1,  # the Proteus framework owns the loop; per-call episode below
             root=run_root,
         )

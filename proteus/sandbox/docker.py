@@ -55,7 +55,8 @@ class SandboxConfig:
 
 class Sandbox(Protocol):
     def run(self, run_root: Path, command: list[str], env: Mapping[str, str],
-            timeout_s: int) -> subprocess.CompletedProcess:
+            timeout_s: int, mounts: tuple[tuple[str, str], ...] = ()
+            ) -> subprocess.CompletedProcess:
         ...
 
 
@@ -63,7 +64,8 @@ class LocalSandbox:
     """No isolation — runs the command as a plain subprocess. For trusted harnesses only."""
 
     def run(self, run_root: Path, command: list[str], env: Mapping[str, str],
-            timeout_s: int) -> subprocess.CompletedProcess:
+            timeout_s: int, mounts: tuple[tuple[str, str], ...] = ()
+            ) -> subprocess.CompletedProcess:
         return subprocess.run(command, capture_output=True, text=True, cwd=str(run_root),
                               env={**dict(env)}, timeout=timeout_s)
 
@@ -81,10 +83,14 @@ class DockerSandbox:
         self.config = config
 
     def run(self, run_root: Path, command: list[str], env: Mapping[str, str],
-            timeout_s: int) -> subprocess.CompletedProcess:
+            timeout_s: int, mounts: tuple[tuple[str, str], ...] = ()
+            ) -> subprocess.CompletedProcess:
+        """`mounts` replaces the default `<run_root>:/run` bind when given — adapters with
+        their own container layout (e.g. dsh's /workspace + /state) pass it per call."""
         c = self.config
-        argv = ["docker", "run", "--rm", "--init", "--network", c.network,
-                "-v", f"{run_root}:/run"]
+        argv = ["docker", "run", "--rm", "--init", "--network", c.network]
+        for host, cont in (mounts or ((str(run_root), "/run"),)):
+            argv += ["-v", f"{host}:{cont}"]
         if c.mem_limit:
             argv += ["--memory", c.mem_limit]
         if c.cpus:

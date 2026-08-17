@@ -83,6 +83,11 @@ class DshHarness:
         self.image = image
         self.network = network
         self.key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY", "")
+        from proteus.sandbox import DockerSandbox, SandboxConfig
+        self.sandbox = DockerSandbox(SandboxConfig(
+            network=network, image=image,
+            env_passthrough=("DEEPSEEK_API_KEY", "DSH_PERMISSION_MODE"),
+        ))
 
     def surfaces(self) -> Sequence[Surface]:
         return self.SURFACES
@@ -90,7 +95,7 @@ class DshHarness:
     def required_edit_tools(self) -> frozenset[str]:
         return frozenset({"write"})
 
-    def seed(self, harness_root: Path) -> None:
+    def seed(self, harness_root: Path, rng_seed: int = 0) -> None:
         harness_root.mkdir(parents=True, exist_ok=True)
         (harness_root / "AGENTS.md").write_text(SEED_INSTRUCTIONS, encoding="utf-8")
         for sub in ("notes", "tools"):
@@ -128,18 +133,15 @@ class DshHarness:
         error = ""
         for phase in PHASES:
             before = self._session_dirs(state)
-            argv = [
-                "docker", "run", "--rm", f"--network={self.network}",
-                "-e", f"DEEPSEEK_API_KEY={self.key}",
-                "-e", "DSH_PERMISSION_MODE=workspace-write",
-                "-v", f"{harness}:/workspace",
-                "-v", f"{state}:/state",
-                self.image, "--profile", "headless",
-                spec.phase_prompts.get(phase, phase),
-            ]
             try:
-                proc = subprocess.run(argv, capture_output=True, text=True,
-                                      timeout=PHASE_TIMEOUT_S)
+                proc = self.sandbox.run(
+                    run_root,
+                    ["--profile", "headless", spec.phase_prompts.get(phase, phase)],
+                    env={"DEEPSEEK_API_KEY": self.key,
+                         "DSH_PERMISSION_MODE": "workspace-write"},
+                    timeout_s=PHASE_TIMEOUT_S,
+                    mounts=((str(harness), "/workspace"), (str(state), "/state")),
+                )
             except subprocess.TimeoutExpired:
                 error = f"phase {phase}: timeout after {PHASE_TIMEOUT_S}s"
                 break

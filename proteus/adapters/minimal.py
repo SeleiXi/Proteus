@@ -70,7 +70,7 @@ class MinimalHarness:
     def required_edit_tools(self) -> frozenset[str]:
         return frozenset({"write_note", "write_tool"})
 
-    def seed(self, harness_root: Path) -> None:
+    def seed(self, harness_root: Path, rng_seed: int = 0) -> None:
         for sub in ("notes", "tools"):
             (harness_root / sub).mkdir(parents=True, exist_ok=True)
         (harness_root / "STATE.md").write_text("# minimal harness\nepisode 0\n")
@@ -84,7 +84,11 @@ class MinimalHarness:
 
     def run_episode(self, spec: EpisodeSpec) -> EpisodeResult:
         harness = spec.root / "harness"
-        rng = random.Random(f"{spec.root.name}:{spec.episode}")
+        for sub in ("notes", "tools"):
+            # git snapshots do not track empty directories, so a restore after a rejected
+            # episode may drop them; an episode must tolerate waking up without them
+            (harness / sub).mkdir(exist_ok=True)
+        rng = random.Random(f"{spec.seed}:{spec.root.name}:{spec.episode}")
         trace_path = spec.root / "traces" / f"ep{spec.episode:03d}.jsonl"
         trace_path.parent.mkdir(parents=True, exist_ok=True)
         turn = 0
