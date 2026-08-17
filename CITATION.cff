@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use Proteus in your research, please cite it."
+title: "Proteus: a harness-agnostic self-evolution framework for AI agents"
+authors:
+  - name: "The Proteus Authors"
+year: 2026
+url: "https://github.com/yichen14/Proteus"
+license: MIT
+# A paper reference will be added when the preprint is public.

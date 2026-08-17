@@ -68,11 +68,11 @@ proteus measure --harness minimal --out runs/demo
 
 ```
 arm              seeds       notes       tools   (mean units built)
-neutral              4         4.0         2.8
-review_notes         4        13.2         0.0
-review_tools         4         3.5         8.0
+neutral              4         3.5         4.0
+review_notes         4        13.0         0.0
+review_tools         4         3.8         8.0
 
-behavioural R (between/within arms, last episode): 2.433  p=0.0170
+behavioural R (between/within arms, last episode): 3.075  p=0.0150
 ```
 
 An installed action preference measurably shifts what the harness grows — and the same
