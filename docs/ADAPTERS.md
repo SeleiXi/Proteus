@@ -1,42 +1,65 @@
-# Writing a Harness Adapter
+# Onboarding a harness
 
-An adapter is how *your* harness plugs into Proteus. It is one class implementing
-`proteus.core.HarnessAdapter`. Once it exists, the framework, sandbox, and the whole
-measurement suite work on your harness unchanged — and the CLI loads it directly, no
-registration:
+The input for onboarding is a **repository** — a git URL or a local path to the harness
+you want to evolve. Onboarding produces two artifacts:
+
+1. a **prepared environment** — a pinned Docker image carrying the harness itself
+   (the evolving workspace is never in the image; it is always a mount);
+2. an **adapter** — one class implementing `proteus.core.HarnessAdapter`, the only code
+   you write.
+
+Once both exist, the framework, sandbox, and the whole measurement suite work on your
+harness unchanged, and the CLI loads your adapter with no registration.
 
 ```bash
-proteus run --harness mypkg.my_adapter:MyHarness \
-    --arm neutral --arm review:notes --seeds 4 --episodes 10 --out runs/mine
-proteus measure --harness mypkg.my_adapter:MyHarness --out runs/mine --travel
+# 1. point Proteus at the harness repo (git URL or local path)
+proteus env scaffold --from https://github.com/org/their-harness --name theirs --ref v1.2.0
+
+# 2. build the pinned environment image (uses the repo's own Dockerfile, or your wrapper)
+proteus env build theirs
+#    -> proteus-env-theirs:<shortsha>, resolved sha recorded in environments/theirs/environment.toml
+
+# 3. write the adapter (the seven methods below), then verify it holds the contract
+proteus check --harness mypkg.theirs_adapter:TheirsHarness            # free, static
+proteus check --harness mypkg.theirs_adapter:TheirsHarness --episode  # + one live episode
+
+# 4. run and measure
+proteus run --harness mypkg.theirs_adapter:TheirsHarness \
+    --arm neutral --arm review:notes --seeds 4 --episodes 10 --out runs/theirs
+proteus measure --harness mypkg.theirs_adapter:TheirsHarness --out runs/theirs --travel
 ```
 
-Two reference implementations cover the two integration shapes:
-
-- **You control the harness code** (it is a Python library, or you can call it in-process):
-  start from `proteus/adapters/minimal.py` (~120 lines).
-- **The harness is someone else's CLI/app** (you should not modify it): start from
-  `proteus/adapters/dsh.py` — it seeds a workspace, runs the stock CLI inside a prepared
-  container per phase (`environments/deepseek-harness/`), installs the disposition as a
-  removable block in a file the harness already reads (`AGENTS.md`), and parses the
-  harness's own session logs into the normalized trace.
+If the repo ships no Dockerfile, `proteus env scaffold --local-dockerfile` writes a wrapper
+stub under `environments/<name>/` that is built with the repo checkout as its context —
+put the runtime the harness needs there (see `environments/deepseek-harness/Dockerfile`:
+Node 24 for dsh, telemetry disabled, version pinned).
 
 ## The contract
 
 ```python
-class MyHarness:
-    name = "my-harness"
+class TheirsHarness:
+    name = "theirs"
 
     def surfaces(self) -> Sequence[Surface]: ...
     def required_edit_tools(self) -> frozenset[str]: ...
-    def seed(self, harness_root: Path) -> None: ...
+    def seed(self, harness_root: Path, rng_seed: int = 0) -> None: ...
     def install_disposition(self, harness_root: Path, disposition: Disposition) -> None: ...
     def run_episode(self, spec: EpisodeSpec) -> EpisodeResult: ...
     def read_trace(self, root: Path, episode: int) -> Sequence[ActionEvent]: ...
     def disposition_fingerprint(self, harness_root: Path) -> str: ...
 ```
 
-### 1. Declare your surfaces
+Two reference implementations cover the two integration shapes:
+
+- **In-process** — you control the harness code (a Python library, or callable
+  in-process): start from `proteus/adapters/minimal.py` (~120 lines).
+- **External CLI** — the harness is someone else's program and you should not modify it:
+  start from `proteus/adapters/dsh.py`. Its episode launches the stock CLI inside the
+  prepared image per phase, the disposition installs as a removable marked block in a file
+  the harness already reads (`AGENTS.md`), and the trace is parsed from the harness's own
+  session logs.
+
+### 1. Declare surfaces
 A `Surface` is one editable, persistent region the agent can grow. Declaring them as data
 is what lets Proteus measure any harness:
 
@@ -47,43 +70,47 @@ Surface("tools",  "tools",  unit="file",      write_tools=frozenset({"tool_write
 ```
 
 `unit` is how the measurement layer counts (a file, a directory, or a top-level def in a
-code file). `free_named=True` means the agent picks unit names (so divergence matches
-renamed-but-similar units).
+code file). `free_named=True` means the agent picks unit names. If the stock harness has no
+such regions, the adapter may establish them by convention in `seed` — the dsh adapter
+seeds `notes/` + `tools/` and names them in the instructions file.
 
-### 2. Seed a fresh harness
-`seed(harness_root)` writes the episode-0 state into `harness_root` — a fresh copy of your
-agent's files (its package, loop, empty surfaces). Proteus snapshots this as commit 0.
+### 2. Seed
+`seed(harness_root, rng_seed)` writes the episode-0 state: the workspace files the harness
+starts from. Proteus snapshots this as commit 0. Episodes must tolerate waking up without
+empty directories (git snapshots do not track them).
 
-### 3. Install a (removable) disposition
-`install_disposition` applies the action-preference perturbation. Pick the form that fits
-your harness:
-- **prompt** — append `disposition.phase_text(phase)` to each phase prompt (simplest);
-- **config** — substitute `disposition.config` (e.g. `SURFACE="memory"`) into a config file;
+### 3. Install a removable disposition
+`install_disposition` applies the action-preference perturbation; reinstalling `NEUTRAL`
+must remove it without residue (`proteus check` verifies both directions via the
+fingerprint). Pick the carrier that fits:
+- **prompt** — append `disposition.phase_text(phase)` / `prompt_suffix` to phase prompts
+  or to an instructions file the harness reads (simplest; dsh uses a marked block);
+- **config** — substitute `disposition.config` into a config file;
 - **patch** — apply `disposition.patch` as a diff (most general; removal is a revert).
 
-It **must be removable** — crystallization reads the harness back with `NEUTRAL` installed.
+### 4. Run one episode, emit the trace
+`run_episode(spec)` executes the four phases (`spec.phase_prompts` carries goal text and
+visible evaluator feedback already merged). `read_trace` returns normalized `ActionEvent`s
+— the only behaviour channel Proteus reads; never self-report. An external harness's own
+logs are the source of truth: parse them, do not instrument the harness.
 
-### 4. Run one episode, emit a normalized trace
-`run_episode(spec)` executes the four phases using `spec.phase_prompts` (the framework has
-already folded in the goal text and any visible evaluator feedback). Write the harness files
-the agent edits, and record each step as an `ActionEvent`. Return an `EpisodeResult`;
-results flow through the trace, not stdout.
-
-`read_trace(root, episode)` returns those `ActionEvent`s. This is the only behaviour channel
-Proteus reads — never self-report.
-
-### 5. Fingerprint the disposition
-`disposition_fingerprint` hashes the currently-installed disposition so drift of `F` over
-episodes is detectable (a self-editing agent may rewrite its own disposition).
+### 5. Fingerprint
+`disposition_fingerprint` hashes the currently-installed disposition carrier, so drift of
+F over episodes is detectable (a self-editing agent may rewrite its own disposition).
 
 ## Isolation
-If your harness lets the agent run its own code (most do), run episodes under
-`DockerSandbox` — an application-level file sandbox cannot contain a process that writes and
-executes code. The `minimal` harness is trusted and uses `LocalSandbox`.
+
+If the harness lets the agent run its own code (most do), episodes must run under
+`DockerSandbox` — an application-level file sandbox cannot contain a process that writes
+and executes code. Use per-call mounts for your container layout (see the dsh adapter);
+declare network policy in the environment manifest, `none` unless the harness itself must
+reach an API.
 
 ## Checklist
-- [ ] surfaces declared as data
-- [ ] `seed` produces a runnable episode-0 harness
-- [ ] disposition install is removable
-- [ ] episode emits a normalized `ActionEvent` trace via `read_trace`
-- [ ] real (code-running) harness runs under `DockerSandbox`
+
+- [ ] environment: image pinned (repo sha recorded in the manifest), state via mounts only
+- [ ] surfaces declared as data (or established by convention in `seed`)
+- [ ] disposition install is removable — `proteus check` passes
+- [ ] trace parsed from the harness's own logs into `ActionEvent`s
+- [ ] real (code-running) harness under `DockerSandbox`
+- [ ] `proteus check --harness <module>:<Class> --episode` passes

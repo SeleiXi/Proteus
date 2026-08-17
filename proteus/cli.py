@@ -151,6 +151,28 @@ def cmd_measure(args) -> int:
     return 0
 
 
+def cmd_check(args) -> int:
+    from proteus.testing import check_adapter
+    adapter = _adapter_factory(args.harness)()
+    return len(check_adapter(adapter, episode=args.episode))
+
+
+def cmd_env_scaffold(args) -> int:
+    from proteus.envs import scaffold
+    manifest = scaffold(args.source, args.name, ref=args.ref,
+                        use_local_dockerfile=args.local_dockerfile)
+    print(f"scaffolded {manifest}")
+    print(f"next: proteus env build {args.name}")
+    return 0
+
+
+def cmd_env_build(args) -> int:
+    from proteus.envs import build
+    tag = build(args.name)
+    print(f"built {tag} (recorded in the manifest)")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="proteus", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -174,6 +196,26 @@ def main(argv=None) -> int:
     m.add_argument("--travel", action="store_true",
                    help="also compute per-surface path length over episode snapshots")
     m.set_defaults(func=cmd_measure)
+
+    c = sub.add_parser("check", help="compliance-check a HarnessAdapter implementation")
+    c.add_argument("--harness", required=True, help="built-in name or <module>:<Class>")
+    c.add_argument("--episode", action="store_true",
+                   help="also run one neutral episode (may launch containers / cost money)")
+    c.set_defaults(func=cmd_check)
+
+    e = sub.add_parser("env", help="prepared environments: scaffold/build from a harness repo")
+    esub = e.add_subparsers(dest="env_cmd", required=True)
+    es = esub.add_parser("scaffold", help="write environments/<name>/ for a harness repo")
+    es.add_argument("--from", dest="source", required=True,
+                    help="git URL or local path of the harness repo")
+    es.add_argument("--name", required=True)
+    es.add_argument("--ref", default="", help="branch/tag/sha to pin")
+    es.add_argument("--local-dockerfile", action="store_true",
+                    help="use a wrapper Dockerfile in environments/<name>/ (stub written)")
+    es.set_defaults(func=cmd_env_scaffold)
+    eb = esub.add_parser("build", help="build the environment image from its manifest")
+    eb.add_argument("name", help="environment name or a path to environment.toml")
+    eb.set_defaults(func=cmd_env_build)
 
     args = ap.parse_args(argv)
     if args.cmd == "run" and not args.arm:
