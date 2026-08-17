@@ -34,7 +34,17 @@ def _adapter_factory(name: str):
     if name == "aki":
         from proteus.adapters.aki import AkiHarness
         return AkiHarness
-    raise SystemExit(f"unknown harness {name!r} (have: minimal, llm, dsh, aki)")
+    if ":" in name:
+        # your own adapter, no registration needed: --harness mypkg.mymodule:MyHarness
+        import importlib
+        mod_name, _, cls_name = name.partition(":")
+        try:
+            cls = getattr(importlib.import_module(mod_name), cls_name)
+        except (ImportError, AttributeError) as exc:
+            raise SystemExit(f"cannot load harness {name!r}: {exc}") from exc
+        return cls
+    raise SystemExit(f"unknown harness {name!r} "
+                     "(built-in: minimal, llm, dsh, aki; or use <module>:<Class>)")
 
 
 def _arm(spec: str):

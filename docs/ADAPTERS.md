@@ -2,8 +2,24 @@
 
 An adapter is how *your* harness plugs into Proteus. It is one class implementing
 `proteus.core.HarnessAdapter`. Once it exists, the framework, sandbox, and the whole
-measurement suite work on your harness unchanged. `proteus/adapters/minimal.py` is a
-complete ~120-line reference; this is the guide.
+measurement suite work on your harness unchanged — and the CLI loads it directly, no
+registration:
+
+```bash
+proteus run --harness mypkg.my_adapter:MyHarness \
+    --arm neutral --arm review:notes --seeds 4 --episodes 10 --out runs/mine
+proteus measure --harness mypkg.my_adapter:MyHarness --out runs/mine --travel
+```
+
+Two reference implementations cover the two integration shapes:
+
+- **You control the harness code** (it is a Python library, or you can call it in-process):
+  start from `proteus/adapters/minimal.py` (~120 lines).
+- **The harness is someone else's CLI/app** (you should not modify it): start from
+  `proteus/adapters/dsh.py` — it seeds a workspace, runs the stock CLI inside a prepared
+  container per phase (`environments/deepseek-harness/`), installs the disposition as a
+  removable block in a file the harness already reads (`AGENTS.md`), and parses the
+  harness's own session logs into the normalized trace.
 
 ## The contract
 
