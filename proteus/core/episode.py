@@ -144,8 +144,10 @@ def run(cfg: RunConfig) -> RunResult:
         if accepted:
             last_accepted = snapshot.commit(harness, f"episode {ep}: {cfg.name}")
         else:
-            # discard the episode's edits; commit the restored tree so the
-            # episode -> commit mapping stays gapless
+            # non-destructive rejection: the rejected candidate tree goes into history
+            # first (as "candidate N:", outside the episode->commit mapping), then the
+            # restore is committed as episode N so the mapping stays gapless
+            snapshot.commit(harness, f"candidate {ep}: {cfg.name} [rejected]")
             snapshot.restore(harness, last_accepted)
             snapshot.commit(harness, f"episode {ep}: {cfg.name} [rejected]")
         done = ep

@@ -22,8 +22,8 @@ class RecordingHarness(MinimalHarness):
         return super().run_episode(spec)
 
 
-def _cfg(tmp_path, adapter, goal, episodes=3):
-    return RunConfig(name="t", adapter=adapter, disposition=NEUTRAL, goal=goal,
+def _cfg(tmp_path, adapter, goal, episodes=3, disposition=NEUTRAL):
+    return RunConfig(name="t", adapter=adapter, disposition=disposition, goal=goal,
                      root=tmp_path / "run", model="mock", episodes=episodes, seed=0)
 
 
@@ -71,7 +71,10 @@ def test_accept_reject_reverts_worse_episode(tmp_path):
         return EvalResult(name="s", score=scores[ctx.episode])
 
     goal = GoalConfig.single(Goal("s", evaluator=scripted), selection="accept_reject")
-    res = run(_cfg(tmp_path, MinimalHarness(), goal))
+    # review("notes") guarantees every episode writes, so the rejected candidate tree
+    # deterministically differs from the last accepted tree
+    from proteus.core import review
+    res = run(_cfg(tmp_path, MinimalHarness(), goal, disposition=review("notes")))
     assert res.episodes_complete == 3
     accepted = [h["accepted"] for h in res.eval_history]
     assert accepted == [True, False, True]
@@ -87,3 +90,11 @@ def test_accept_reject_reverts_worse_episode(tmp_path):
 
     assert sha2 is not None                  # mapping stays gapless
     assert tree(sha2) == tree(sha1)          # rejected episode's tree == last accepted
+
+    # non-destructive: the rejected candidate tree is preserved in history
+    log = subprocess.run(["git", "--git-dir", str(git_dir), "log", "--format=%H %s"],
+                         capture_output=True, text=True, check=True).stdout
+    cand = next((l.split()[0] for l in log.splitlines()
+                 if "candidate 2:" in l), None)
+    assert cand is not None
+    assert tree(cand) != tree(sha1)          # the discarded work is still inspectable
