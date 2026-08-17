@@ -155,10 +155,14 @@ from proteus.measure import distance, stream, crystallize
 
 ## Status
 
-`v0.1.0`. The `minimal` harness and the full measurement suite are working and offline. The
-`aki` adapter is the reference research integration (set `AKI_HARNESS_SRC`). Proteus is the
-open framework behind our paper on action preference as an initial condition for
-self-improving agents; it is designed to reproduce every experiment in that work.
+`v0.1`. The `minimal` harness and the full measurement suite work offline. The `aki`
+adapter's **measure path** (trace parsing, disposition fingerprint) is pure-Python and reads
+existing Aki run roots with no checkout; its **run path** drives the containerized Aki
+research runner (set `AKI_HARNESS_SRC`). As a cross-implementation check, Proteus's
+behavioural ruler applied to the research runs independently reproduces their headline
+dynamics: arms separate at episode 1 (R = 1.63) and converge by episode 30 (R = 0.93).
+Proteus is the open framework behind our paper on action preference as an initial condition
+for self-improving agents.
 
 ## License
 
