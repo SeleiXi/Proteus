@@ -1,0 +1,130 @@
+"""The harness-agnostic contract.
+
+Proteus drives self-evolution over an *arbitrary* agent harness. It knows nothing about
+any specific harness (Aki, OpenHands, SWE-agent, your own loop); it talks only to a
+`HarnessAdapter`. A harness ships one adapter and Proteus can then evolve it, measure it,
+and swap dispositions in and out of it uniformly.
+
+The three things a self-evolution driver needs from a harness, and none of the existing
+agent frameworks expose together, are declared here:
+
+  1. its persistent, editable **surfaces** (memory / skills / tools / code / ...), as data
+     so the measurement layer iterates a manifest instead of hard-coded names;
+  2. a way to **run one episode** and emit a normalized **action trace**;
+  3. a way to **install and remove a disposition** (the action-preference perturbation)
+     and to **snapshot** the working state, so divergence and crystallization are
+     measurable.
+
+Everything else (which model, how the loop is written, what the tools are) is the
+harness's business.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
+
+
+@dataclass(frozen=True)
+class Surface:
+    """One persistent, agent-editable region of the harness.
+
+    A surface is the unit the measurement layer counts over. `memory`, `skills`, and
+    `tools` are the familiar ones, but a harness declares its own — a bare ReAct loop
+    might expose only `notes`; a coding agent might add `patches`. Because the set is
+    data, not a constant baked into the framework, any harness is measurable.
+    """
+
+    name: str
+    subdir: str                      # directory under the harness root holding this surface
+    unit: str = "file"               # "file" | "directory" | "top_level_def"
+    write_tools: frozenset[str] = frozenset()   # tool names that count as edits here
+    is_code: bool = False            # edits pass the viability gate (must still run)
+    free_named: bool = True          # agent chooses unit names (affects rename-matching)
+
+
+@dataclass(frozen=True)
+class ActionEvent:
+    """One normalized step of the action trace.
+
+    The trace is the only channel Proteus reads to characterise behaviour — never the
+    agent's self-report. A harness emits these (or Proteus derives them from the harness's
+    own log via `read_trace`), so measurement never depends on any harness's internal
+    event taxonomy.
+    """
+
+    turn: int
+    phase: str                       # observe | propose | act | reflect
+    tool: str | None = None          # None => a text-only turn (a decision to reason/stop)
+    surface: str | None = None       # which surface this call targeted, if any
+    params: Mapping[str, Any] = field(default_factory=dict)
+    text: str = ""                   # the model's text for this step, if any
+
+
+@dataclass(frozen=True)
+class EpisodeSpec:
+    """What the harness needs to run exactly one context-fresh episode."""
+
+    root: Path                       # the run root; harness working tree lives at root/harness
+    episode: int                     # 1-based
+    model: str                       # model id the harness should use
+    phase_prompts: Mapping[str, str] # observe/propose/act/reflect texts (goal + evaluator
+                                     # feedback already merged in by the episode driver)
+    max_turns: int = 100
+    extra_env: Mapping[str, str] = field(default_factory=dict)
+
+
+@runtime_checkable
+class HarnessAdapter(Protocol):
+    """The whole contract. Implement this and Proteus can evolve your harness."""
+
+    name: str
+
+    # --- static declaration -------------------------------------------------------------
+    def surfaces(self) -> Sequence[Surface]:
+        """The editable surfaces this harness exposes, as a manifest."""
+        ...
+
+    def required_edit_tools(self) -> frozenset[str]:
+        """Tools whose presence proves the harness can still edit itself (viability)."""
+        ...
+
+    # --- provisioning -------------------------------------------------------------------
+    def seed(self, harness_root: Path) -> None:
+        """Materialise a fresh copy of the harness into `harness_root` (episode 0 state)."""
+        ...
+
+    def install_disposition(self, harness_root: Path, disposition: "Disposition") -> None:
+        """Apply the action-preference perturbation. Must be removable (see `Disposition`)."""
+        ...
+
+    # --- run + observe ------------------------------------------------------------------
+    def run_episode(self, spec: EpisodeSpec) -> "EpisodeResult":
+        """Run one episode against the harness at `spec.root`. Returns the result; the
+        action trace is obtained via `read_trace` so the loop stays print-safe."""
+        ...
+
+    def read_trace(self, root: Path, episode: int) -> Sequence[ActionEvent]:
+        """The normalized action trace for one episode."""
+        ...
+
+    # --- immutability observable --------------------------------------------------------
+    def disposition_fingerprint(self, harness_root: Path) -> str:
+        """A hash of the currently-installed disposition, to detect drift of F over time."""
+        ...
+
+
+@dataclass
+class EpisodeResult:
+    """What `run_episode` reports. Results flow through the trace, not stdout."""
+
+    episode: int
+    ok: bool
+    turns: int = 0
+    error: str = ""
+    counters: Mapping[str, Any] = field(default_factory=dict)
+
+
+# `Disposition` is imported lazily to avoid a cycle; declared here for the Protocol only.
+from proteus.core.disposition import Disposition  # noqa: E402

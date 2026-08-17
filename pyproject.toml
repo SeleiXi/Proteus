@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proteus-evolve"
+version = "0.1.0"
+description = "A harness-agnostic driver for measuring agent self-evolution: plug in any harness × model, evolve it under goal or no-goal conditions, and measure how the harness changes."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Proteus Authors" }]
+keywords = ["agents", "self-evolution", "harness", "llm", "self-improving"]
+dependencies = []
+
+[project.optional-dependencies]
+llm = ["openai>=1.0"]
+sandbox = []          # Docker is invoked via the CLI, no Python SDK required
+dev = ["pytest>=7.0", "ruff>=0.1.0"]
+
+[project.scripts]
+proteus = "proteus.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["proteus*"]
+
+[tool.ruff]
+line-length = 100
