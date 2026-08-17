@@ -71,13 +71,16 @@ def commit_for_episode(work_tree: Path, episode: int) -> str | None:
 
 
 def restore(work_tree: Path, sha: str) -> None:
-    """Reset the working tree to `sha`, discarding everything after it.
+    """Return the working tree (and index) to the state at `sha` without moving HEAD.
 
     Used by accept/reject selection: a rejected episode's edits are removed and the tree
-    returns to the last accepted state. `reset --hard` restores tracked content; `clean
-    -fd` removes files the rejected episode added (untracked relative to `sha`).
+    returns to the last accepted state. Deliberately NOT `reset --hard`: that moves the
+    branch pointer and orphans any commit made after `sha` — which would silently drop
+    the preserved rejected-candidate commit from history. `restore --source` rewrites
+    index + worktree only; `clean -fd` then removes files that became untracked (added
+    after `sha`).
     """
-    _git(work_tree, "reset", "--hard", sha)
+    _git(work_tree, "restore", "--source", sha, "--staged", "--worktree", "--", ".")
     _git(work_tree, "clean", "-fd")
 
 
