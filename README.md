@@ -1,6 +1,31 @@
-# Proteus
+<p align="center">
+  <img src="docs/assets/proteus-logo.png" alt="Proteus logo" width="340">
+</p>
 
-**A harness-agnostic self-evolution framework for AI agents.**
+<h3 align="center">A harness-agnostic self-evolution framework for AI agents</h3>
+
+<p align="center">
+  <b>Continuously evolve. Measure what changed.</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/yichen14/Proteus/actions/workflows/ci.yml"><img src="https://github.com/yichen14/Proteus/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/version-0.1.0-informational.svg" alt="v0.1.0">
+  <img src="https://img.shields.io/badge/status-research%20preview-orange.svg" alt="research preview">
+</p>
+
+<p align="center">
+  <a href="#-60-second-demo-no-api-key-no-docker">Quick Start</a> •
+  <a href="#-harnesses-in-the-box">Harnesses</a> •
+  <a href="#%EF%B8%8F-how-it-works">How It Works</a> •
+  <a href="docs/ADAPTERS.md">Onboard Your Harness</a> •
+  <a href="environments/README.md">Environments</a> •
+  <a href="#-measurement">Measurement</a>
+</p>
+
+---
 
 Plug in *any* agent harness × *any* model, let it rewrite its own harness over many
 context-fresh episodes, and measure **how the harness changes** — under a goal, many goals,
@@ -9,9 +34,7 @@ or no goal at all.
 > Named for the sea-god who changes shape at will: Proteus watches a harness reshape
 > itself, and gives you the ruler to measure the change.
 
----
-
-## Why Proteus is different
+## 🔭 Why Proteus is different
 
 Agent self-improvement is moving from the weights to the **harness** — the prompts, memory,
 skills, tools, and control loop the model runs on. Recent systems evolve a harness to raise
@@ -21,40 +44,25 @@ self-evolving harness actually *do*, and does an initial condition leave a perma
 Three things set it apart from every existing harness-evolution system:
 
 1. **Harness-agnostic.** Others evolve harnesses built from their *own* primitives. Proteus
-   evolves *yours*: implement one small `HarnessAdapter` and your agent — Aki (default), a
-   bare ReAct loop, or your own — plugs into the same framework, sandbox, and measurement.
+   evolves *yours*: implement one small `HarnessAdapter` and your agent — Aki (default),
+   DeepSeek Harness, a bare ReAct loop, or your own — plugs into the same framework,
+   sandbox, and measurement.
 2. **Goal *and* no-goal, with visible or hidden evaluators.** Others hard-code a single
    regime: one benchmark verifier, agent blind to the score, goal mandatory. Proteus spans
-   the space — `no-goal | one goal | many goals`, and evaluators that the agent either
-   **sees** (in the observe phase) or **never sees**. No-goal, unpressured evolution is a
+   the space — `no-goal | one goal | many goals`, and evaluators the agent either **sees**
+   (in the observe phase) or **never sees**. No-goal, unpressured evolution is a
    first-class mode.
 3. **A measurement instrument, not just a score.** Others report task pass-rates. Proteus
    ships the ruler for the harness itself: **structural distance** between harness states
-   (per surface, path-length), a **crystallization / swap** test (remove the disposition,
+   (per surface, path length), a **crystallization / swap** test (remove the disposition,
    read the harness back), and **behavioural distance** with a permutation test (the
    action-preference statistic). Every condition is read with the same ruler.
 
-## Install
+## 🚀 60-second demo (no API key, no Docker)
 
 ```bash
 pip install -e .            # dependency-free: even the live-LLM harness runs on stdlib
 ```
-
-## Harnesses in the box
-
-| adapter | what it is | needs |
-|---|---|---|
-| `minimal` | offline reference harness (mock policy) | nothing |
-| `llm` | the same harness driven by a live model — any OpenAI-compatible endpoint, DeepSeek by default | an API key |
-| `dsh` | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), headless profile, in a prepared container | Docker + a DeepSeek key |
-| `aki` | the Aki research harness (the paper's apparatus) | the research checkout |
-
-`dsh` is the template for third-party integrations: no harness code modified — the adapter
-seeds a workspace, launches the prepared container per phase, and reads the session logs
-back. Its disposition installs as a removable block in `AGENTS.md`, which dsh reads
-natively.
-
-## 60-second demo (no API key, no Docker)
 
 The bundled `minimal` harness runs fully offline, so you can see the whole pipeline before
 wiring up a real agent:
@@ -78,7 +86,26 @@ behavioural R (between/within arms, last episode): 3.075  p=0.0150
 An installed action preference measurably shifts what the harness grows — and the same
 `measure` reads a no-goal run and a goal run identically.
 
-## How it works
+## 🧩 Harnesses in the box
+
+| adapter | what it is | needs |
+|---|---|---|
+| `minimal` | offline reference harness (mock policy) | nothing |
+| `llm` | the same harness driven by a live model — any OpenAI-compatible endpoint, DeepSeek by default | an API key |
+| `dsh` | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), headless profile, in a prepared container | Docker + a DeepSeek key |
+| `aki` | the Aki research harness (the paper's apparatus) | the research checkout |
+| yours | `--harness <module>:<Class>` — no registration | your adapter |
+
+`dsh` is the template for third-party integrations: no harness code modified — the adapter
+seeds a workspace, launches the prepared container per phase, and reads the session logs
+back. Its disposition installs as a removable block in `AGENTS.md`, which dsh reads
+natively.
+
+## 🏗️ How it works
+
+<p align="center">
+  <img src="docs/assets/proteus-architecture.png" alt="The Proteus evolve loop" width="900">
+</p>
 
 Every seed runs `N` context-fresh **episodes**; only files cross the episode boundary. One
 episode is four phases:
@@ -94,8 +121,8 @@ observe  →  propose  →  act  →  reflect
 - **reflect** — decide what to keep.
 
 The **framework** owns everything that is not the harness (prompts, goal text, evaluator
-routing, snapshotting, measurement). The **adapter** owns everything that is (how the four
-phases actually execute). That split is what makes Proteus harness-agnostic.
+routing, snapshotting, selection, measurement). The **adapter** owns everything that is
+(how the four phases actually execute). That split is what makes Proteus harness-agnostic.
 
 ### The core objects
 
@@ -104,7 +131,7 @@ phases actually execute). That split is what makes Proteus harness-agnostic.
 | `HarnessAdapter` | the contract a harness implements: its surfaces, how to run an episode, how to read the action trace, how to install/remove a disposition |
 | `Surface` | one editable, persistent region (memory / skills / tools / code / …), declared as data so the measurement layer needs no hard-coded names |
 | `Disposition` | the action-preference perturbation — a **single, removable** change at t=0 (prompt suffix, config value, or code patch) |
-| `GoalConfig` | goal / no-goal / multi-goal, each evaluator `HIDDEN` or `OBSERVE`-visible |
+| `GoalConfig` | goal / no-goal / multi-goal, each evaluator `HIDDEN` or `OBSERVE`-visible, plus outer-loop selection (`accept_reject`) |
 | `Sandbox` | where an episode runs; `LocalSandbox` (trusted) or `DockerSandbox` (OS-level isolation, tunable network) |
 
 ### Action preference
@@ -124,14 +151,15 @@ NEUTRAL              # the control, F0 — no perturbation
 ```python
 from proteus.core import GoalConfig, Goal, Visibility
 
-GoalConfig.no_goal()                                   # unpressured evolution
+GoalConfig.no_goal()                                    # unpressured evolution
 GoalConfig.single(Goal("solve", text=..., evaluator=my_eval,
                        visibility=Visibility.OBSERVE))  # agent sees its score
 GoalConfig.multi([...])                                 # several objectives at once
+GoalConfig.single(goal, selection="accept_reject")      # outer loop rejects regressions
 ```
 
 An evaluator is any callable `(trace, ctx) -> EvalResult`; bring a benchmark verifier, an
-LLM judge, or an intrinsic measure.
+LLM judge, or one of the built-ins (`proteus.core.evaluators`).
 
 ### Sandbox
 
@@ -147,43 +175,58 @@ A self-editing agent writes and runs its own code, so an application-level file 
 cannot contain it — Proteus runs real harnesses in a container whose filesystem holds the
 harness and nothing else.
 
-### Prepared environments
+## 🔌 Onboard your harness
+
+The input is a **repository** — a git URL or local path:
+
+```bash
+proteus env scaffold --from https://github.com/org/their-harness --name theirs --ref v1.2.0
+proteus env build theirs             # pinned image, resolved sha recorded in the manifest
+# write the adapter (7 methods), then:
+proteus check --harness mypkg.theirs_adapter:TheirsHarness --episode
+proteus run   --harness mypkg.theirs_adapter:TheirsHarness --arm neutral ...
+```
+
+`proteus check` machine-verifies the contract (removable disposition via fingerprint
+round-trip, snapshot-ability, trace shape). The full guide: [docs/ADAPTERS.md](docs/ADAPTERS.md).
+
+## 📦 Prepared environments
 
 `environments/` ships one pinned Docker environment per supported harness — a `Dockerfile`
 plus an `environment.toml` manifest (`SandboxConfig.from_manifest` loads it). The evolving
 workspace is always a mount, never baked into the image, so one image serves every
-condition and seed. `environments/README.md` has the conventions; `docs/ENVIRONMENTS.md`
-records the design survey behind them.
+condition and seed. Conventions: [environments/README.md](environments/README.md); design
+survey behind them (what we borrowed from Harbor): [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md).
 
-## Plug in your own harness
-
-Implement `HarnessAdapter` (see `proteus/adapters/minimal.py` for a ~120-line reference and
-`docs/ADAPTERS.md` for the guide). Declare your surfaces, run one episode, emit a normalized
-action trace, and install a removable disposition. That's it — the framework, sandbox, and the
-entire measurement suite work unchanged.
-
-## Measurement
+## 📏 Measurement
 
 ```python
 from proteus.measure import distance, stream, crystallize
 ```
 
-- `distance` — structural distance per surface (added / dropped / revised), path length.
+- `distance` — structural distance per surface (added / dropped / revised), path length
+  (`proteus measure --travel`).
 - `stream` — behavioural distance (frequency / order / procedure) and the between/within
   permutation test `R`.
 - `crystallize` — mount an evolved state under a neutral disposition and test whether it
   reads back as its own endpoint (two-stage fidelity + arm-shift).
 
-## Status
+## 📊 Status
 
-`v0.1`. Working today: the offline `minimal` harness with the full measurement suite; the
-`llm` harness live against DeepSeek; the `dsh` adapter running DeepSeek Harness headless
-episodes in its prepared container; and the `aki` adapter — measure path reads existing
-research runs with no checkout, run path drives the containerized research runner. As a
-cross-implementation check, Proteus's behavioural ruler applied to the research runs
-independently reproduces their headline dynamics: arms separate at episode 1 (R = 1.63) and
-converge by episode 30 (R = 0.93). Proteus is the open framework behind our paper on action
-preference as an initial condition for self-improving agents.
+`v0.1` (research preview). Working today: the offline `minimal` harness with the full
+measurement suite; the `llm` harness live against DeepSeek; the `dsh` adapter running
+DeepSeek Harness headless episodes in its prepared container; the `aki` adapter — measure
+path reads existing research runs with no checkout, run path drives the containerized
+research runner; repo-first environment builds; the adapter compliance checker; CI on
+Python 3.10–3.14. As a cross-implementation check, Proteus's behavioural ruler applied to
+the research runs independently reproduces their headline dynamics: arms separate at
+episode 1 (R = 1.63) and converge by episode 30 (R = 0.93). Proteus is the open framework
+behind our paper on action preference as an initial condition for self-improving agents.
+
+## 📖 Citation
+
+See [CITATION.cff](CITATION.cff). A paper reference will be added when the preprint is
+public.
 
 ## License
 
