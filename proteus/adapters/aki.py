@@ -122,6 +122,10 @@ class AkiHarness:
     def install_disposition(self, harness_root: Path, disposition: Disposition) -> None:
         grid, supervisor, Condition, RunConfig = self._api()
         arm = self._arm_label(disposition)
+        # Materialize the arm's persona under the Proteus sweep root, not the research
+        # grid's own root — a concurrently running grid must never see our writes.
+        grid.ROOT = harness_root.parent.parent
+        grid.ROOT.mkdir(parents=True, exist_ok=True)
         grid._install_arm(arm)
         run_root = harness_root.parent
         config = RunConfig(
