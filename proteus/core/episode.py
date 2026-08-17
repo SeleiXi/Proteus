@@ -46,6 +46,10 @@ class RunConfig:
     episodes: int = 30
     max_turns: int = 100
     seed: int = 0
+    progress_path: Path | None = None
+    """Where to append one JSON line per finished episode (live tracking). Must live
+    OUTSIDE `root`: the subject agent can read its own run root, and a progress record
+    carries the condition label and HIDDEN evaluator scores."""
 
 
 @dataclass
@@ -74,6 +78,24 @@ def _phase_prompts(cfg: RunConfig, prior_feedback: str) -> dict[str, str]:
         if suffix:
             prompts[ph] = f"{prompts[ph]}\n\n{suffix}"
     return prompts
+
+
+def _append_progress(cfg: RunConfig, ep: int, res, trace, accepted: bool, results) -> None:
+    """One JSON line per finished episode, for the live report. Never inside cfg.root."""
+    import time
+    from proteus.measure import distance
+    units = distance.units(cfg.root / "harness", cfg.adapter.surfaces())
+    rec = {
+        "ts": time.time(), "name": cfg.name, "seed": cfg.seed, "episode": ep,
+        "episodes_target": cfg.episodes, "ok": res.ok, "turns": res.turns,
+        "tool_calls": sum(1 for e in trace if e.tool),
+        "units": {k: len(v) for k, v in units.items()},
+        "accepted": accepted,
+        "scores": {r.name: r.score for r in results},
+    }
+    cfg.progress_path.parent.mkdir(parents=True, exist_ok=True)
+    with cfg.progress_path.open("a", encoding="utf-8") as sink:
+        sink.write(json.dumps(rec) + "\n")
 
 
 def run(cfg: RunConfig) -> RunResult:
@@ -133,6 +155,9 @@ def run(cfg: RunConfig) -> RunResult:
         prior_feedback = cfg.goal.observe_feedback(by_name)  # OBSERVE-visible only
         if prior_feedback and not accepted:
             prior_feedback += "\n(Your last episode's changes were not kept.)"
+
+        if cfg.progress_path is not None:
+            _append_progress(cfg, ep, res, trace, accepted, results)
 
     (cfg.root / "eval_history.json").write_text(json.dumps(eval_history, indent=1))
     return RunResult(name=cfg.name, episodes_complete=done, root=str(cfg.root),

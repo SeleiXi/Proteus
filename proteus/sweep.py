@@ -40,16 +40,28 @@ def opaque_id(arm: str, seed: int) -> str:
 
 def run_sweep(cfg: SweepConfig) -> list[dict]:
     cfg.root.mkdir(parents=True, exist_ok=True)
+
+    # manifest first: the live report discovers every planned run from it, so tracking
+    # works from episode 1 — not only after a seed completes
+    runs = [{"id": opaque_id(arm.label, s), "arm": arm.label, "seed": s}
+            for arm in cfg.arms for s in range(cfg.seeds)]
+    (cfg.root / "manifest.json").write_text(json.dumps({
+        "name": cfg.name, "episodes": cfg.episodes,
+        "arms": [a.label for a in cfg.arms], "seeds": cfg.seeds, "runs": runs,
+    }, indent=1))
+
     records: list[dict] = []
     records_path = cfg.root / "seeds.jsonl"
     with records_path.open("a", encoding="utf-8") as sink:
         for arm in cfg.arms:
             for s in range(cfg.seeds):
-                run_root = cfg.root / "runs" / opaque_id(arm.label, s)
+                rid = opaque_id(arm.label, s)
+                run_root = cfg.root / "runs" / rid
                 rc = RunConfig(
                     name=arm.label, adapter=cfg.adapter_factory(), disposition=arm,
                     goal=cfg.goal, root=run_root, model=cfg.model,
                     episodes=cfg.episodes, max_turns=cfg.max_turns, seed=s,
+                    progress_path=cfg.root / "progress" / f"{rid}.jsonl",
                 )
                 res = run(rc)
                 rec = {"arm": arm.label, "seed": s, "root": str(run_root),

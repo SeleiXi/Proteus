@@ -211,6 +211,26 @@ from proteus.measure import distance, stream, crystallize
 - `crystallize` — mount an evolved state under a neutral disposition and test whether it
   reads back as its own endpoint (two-stage fidelity + arm-shift).
 
+## 📤 Outputs
+
+Every run's primary artifact is its **evolution history as a git repository** — one commit
+per episode. Keep it local, browse it, or push it wherever you like (never automatic):
+
+```bash
+proteus repo export runs/demo/runs/run-<id> my-evolution   # normal repo, `git log` = the trajectory
+proteus repo push   runs/demo/runs/run-<id> git@github.com:you/my-evolution.git
+```
+
+Every sweep also ships a **live tracking page** — per-run progress, per-surface growth
+curves, evaluator scores — updating while the sweep runs:
+
+```bash
+proteus watch --out runs/demo          # http://localhost:8300/report.html
+```
+
+Tracking data (condition labels, hidden scores) lives at the sweep level, outside run
+roots, so the evolving agent can never read its own condition.
+
 ## 📊 Status
 
 `v0.1` (research preview). Working today: the offline `minimal` harness with the full

@@ -173,6 +173,32 @@ def cmd_env_build(args) -> int:
     return 0
 
 
+def cmd_report(args) -> int:
+    from proteus.report import write_report
+    out = write_report(Path(args.out).expanduser())
+    print(f"wrote {out} (serve with: proteus watch --out {args.out})")
+    return 0
+
+
+def cmd_watch(args) -> int:
+    from proteus.report import serve, write_report
+    root = Path(args.out).expanduser()
+    write_report(root)
+    serve(root, port=args.port)
+    return 0
+
+
+def cmd_repo(args) -> int:
+    from proteus.report import export_repo, push_repo
+    if args.repo_cmd == "export":
+        dest = export_repo(Path(args.run_root), Path(args.dest), branch=args.branch)
+        print(f"exported evolution history to {dest} (one commit per episode)")
+    else:
+        push_repo(Path(args.run_root), args.remote, branch=args.branch)
+        print(f"pushed {args.run_root} -> {args.remote} ({args.branch})")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="proteus", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -216,6 +242,28 @@ def main(argv=None) -> int:
     eb = esub.add_parser("build", help="build the environment image from its manifest")
     eb.add_argument("name", help="environment name or a path to environment.toml")
     eb.set_defaults(func=cmd_env_build)
+
+    rp = sub.add_parser("report", help="write the tracking page into a sweep root")
+    rp.add_argument("--out", required=True)
+    rp.set_defaults(func=cmd_report)
+
+    w = sub.add_parser("watch", help="serve a sweep's live tracking page")
+    w.add_argument("--out", required=True)
+    w.add_argument("--port", type=int, default=8300)
+    w.set_defaults(func=cmd_watch)
+
+    g = sub.add_parser("repo", help="export or push a run's evolution history (git)")
+    gsub = g.add_subparsers(dest="repo_cmd", required=True)
+    ge = gsub.add_parser("export", help="clone the snapshot chain into a normal repo")
+    ge.add_argument("run_root")
+    ge.add_argument("dest")
+    ge.add_argument("--branch", default="main")
+    ge.set_defaults(func=cmd_repo)
+    gp = gsub.add_parser("push", help="push the snapshot chain to a remote you provide")
+    gp.add_argument("run_root")
+    gp.add_argument("remote")
+    gp.add_argument("--branch", default="main")
+    gp.set_defaults(func=cmd_repo)
 
     args = ap.parse_args(argv)
     if args.cmd == "run" and not args.arm:
