@@ -3,9 +3,10 @@ import sys, tempfile, pathlib, traceback
 
 def main() -> int:
     import tests.test_goals as G, tests.test_smoke as S, tests.test_aki_adapter as A
+    import tests.test_bench as B
     tmp = pathlib.Path(tempfile.mkdtemp())
     passed = failed = 0
-    for mod in (G, S, A):
+    for mod in (G, S, A, B):
         for name in [n for n in dir(mod) if n.startswith("test_")]:
             fn = getattr(mod, name)
             d = tmp / mod.__name__ / name

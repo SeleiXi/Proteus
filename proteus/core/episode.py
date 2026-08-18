@@ -46,6 +46,10 @@ class RunConfig:
     episodes: int = 30
     max_turns: int = 100
     seed: int = 0
+    task: object | None = None
+    """A `proteus.bench.BenchTask` to seed into the harness before episode 1, for
+    goal-conditioned runs. The task workspace lives inside the harness workspace so no
+    adapter needs to know about it."""
     progress_path: Path | None = None
     """Where to append one JSON line per finished episode (live tracking). Must live
     OUTSIDE `root`: the subject agent can read its own run root, and a progress record
@@ -103,6 +107,9 @@ def run(cfg: RunConfig) -> RunResult:
     harness = cfg.root / "harness"
     cfg.adapter.seed(harness, cfg.seed)
     cfg.adapter.install_disposition(harness, cfg.disposition)
+    if cfg.task is not None:
+        from proteus.bench.task import seed_task
+        seed_task(harness, cfg.task)
     snapshot.init(harness)
 
     eval_history: list[dict] = []

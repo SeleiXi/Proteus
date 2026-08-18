@@ -66,3 +66,52 @@ proteus env build yours
 # write the adapter (docs/ADAPTERS.md), then:
 proteus check --harness mypkg.yours_adapter:YoursHarness --episode
 ```
+
+## With-goal ablation — benchmarks as goals
+
+Proteus's goal axis becomes an experiment when the goal is a *task* and the evaluator is
+its grader. `proteus.bench` supplies both from one object:
+
+```python
+from proteus.bench import as_goal
+from proteus.bench.local import local_task
+from proteus.core import Visibility
+from proteus.core.episode import RunConfig, run
+
+task = local_task("local:interval-merge")        # offline; no Docker, no dataset
+cfg = RunConfig(name="goal-observe", adapter=..., disposition=...,
+                goal=as_goal(task, visibility=Visibility.OBSERVE),
+                root=..., model=..., episodes=30, task=task)
+run(cfg)
+```
+
+The task is seeded into `harness/task/` before episode 1 and graded after every episode, so
+the ablation is a matter of swapping one field:
+
+| condition | `goal=` |
+|---|---|
+| no goal (this paper's primary regime) | `GoalConfig.no_goal()` |
+| goal, score hidden from the agent | `as_goal(task)` |
+| goal, score shown in the next observe phase | `as_goal(task, visibility=Visibility.OBSERVE)` |
+| goal + outer-loop rejection of regressions | `as_goal(task, selection="accept_reject")` |
+
+**Two workspaces, do not confuse them.** `harness/` is what evolves and what the rulers
+measure; `harness/task/` is what the agent was asked to work on. Task files land inside the
+harness workspace on purpose — every adapter already gives the agent file access there, so
+a benchmark needs no adapter change — but that means the measurement layer counts them as
+structure unless you exclude `TASK_SUBDIR`.
+
+### SWE-bench
+
+`proteus.bench.swe.swe_task("django__django-11133")` grades through the official harness
+(`make_test_spec` + `run_instance`), reporting the binary `resolved` as `passed` and the
+fail-to-pass fraction as `score` (a sparse 0/1 reward says little about *direction*, which
+is what an evolution study reads).
+
+Written against the verified upstream API; **not yet executed** — it needs an x86_64 Linux
+box with ~120 GB free disk (per-instance images), `pip install swebench datasets docker`,
+and network for the first pull. Three constraints are load-bearing and documented in the
+module: the only bridge to the grader is `git diff base_commit` (so the task workspace must
+be that repo at that commit — `setup` clones it), the upstream cache keys on
+`(run_id, instance_id)` and ignores the patch (so the run id embeds the episode), and every
+distinct instance is another image (so pin a small fixed set).
