@@ -21,6 +21,7 @@
   <a href="#-harnesses-in-the-box">Harnesses</a> •
   <a href="#%EF%B8%8F-how-it-works">How It Works</a> •
   <a href="docs/ADAPTERS.md">Onboard Your Harness</a> •
+  <a href="docs/RECIPES.md">Recipes</a> •
   <a href="environments/README.md">Environments</a> •
   <a href="#-measurement">Measurement</a>
 </p>
@@ -93,6 +94,7 @@ An installed action preference measurably shifts what the harness grows — and 
 | `minimal` | offline reference harness (mock policy) | nothing |
 | `llm` | the same harness driven by a live model — any OpenAI-compatible endpoint, DeepSeek by default | an API key |
 | `dsh` | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), headless profile, in a prepared container | Docker + a DeepSeek key |
+| `pi` | [Pi](https://github.com/badlogic/pi-mono) — Mario Zechner's minimal coding harness (4 tools, native AGENTS.md + skills) | Docker + a DeepSeek key |
 | `aki` | the Aki research harness (the paper's apparatus) | the research checkout |
 | yours | `--harness <module>:<Class>` — no registration | your adapter |
 

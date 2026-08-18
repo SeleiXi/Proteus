@@ -22,7 +22,6 @@ dsh's zstd-compressed session JSONL.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
@@ -35,9 +34,6 @@ from proteus.core.episode import PHASES
 
 IMAGE = os.environ.get("PROTEUS_DSH_IMAGE", "proteus-env-dsh:0.1.0-rc.7")
 PHASE_TIMEOUT_S = 600
-DISPOSITION_OPEN = "<!-- proteus:disposition -->"
-DISPOSITION_CLOSE = "<!-- /proteus:disposition -->"
-
 SEED_INSTRUCTIONS = """\
 # Agent instructions
 
@@ -102,17 +98,8 @@ class DshHarness:
             (harness_root / sub).mkdir(exist_ok=True)
 
     def install_disposition(self, harness_root: Path, disposition: Disposition) -> None:
-        path = harness_root / "AGENTS.md"
-        text = path.read_text(encoding="utf-8")
-        # remove any previous block, then append the new one (NEUTRAL appends nothing)
-        if DISPOSITION_OPEN in text:
-            head, _, rest = text.partition(DISPOSITION_OPEN)
-            _, _, tail = rest.partition(DISPOSITION_CLOSE)
-            text = head + tail
-        if not disposition.is_empty and disposition.prompt_suffix:
-            text = (text.rstrip() + "\n\n" + DISPOSITION_OPEN + "\n"
-                    + disposition.prompt_suffix.strip() + "\n" + DISPOSITION_CLOSE + "\n")
-        path.write_text(text, encoding="utf-8")
+        from proteus.adapters import instructions
+        instructions.install_block(harness_root / "AGENTS.md", disposition)
 
     # ------------------------------------------------------------------ episodes
 
@@ -221,12 +208,5 @@ class DshHarness:
         return events
 
     def disposition_fingerprint(self, harness_root: Path) -> str:
-        path = Path(harness_root) / "AGENTS.md"
-        if not path.exists():
-            return ""
-        text = path.read_text(encoding="utf-8")
-        if DISPOSITION_OPEN in text:
-            block = text.split(DISPOSITION_OPEN, 1)[1].split(DISPOSITION_CLOSE, 1)[0]
-        else:
-            block = ""
-        return hashlib.sha256(block.encode()).hexdigest()[:16]
+        from proteus.adapters import instructions
+        return instructions.block_fingerprint(Path(harness_root) / "AGENTS.md")

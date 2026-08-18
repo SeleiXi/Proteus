@@ -31,6 +31,9 @@ def _adapter_factory(name: str):
     if name == "dsh":
         from proteus.adapters.dsh import DshHarness
         return DshHarness
+    if name == "pi":
+        from proteus.adapters.pi import PiHarness
+        return PiHarness
     if name == "aki":
         from proteus.adapters.aki import AkiHarness
         return AkiHarness
@@ -44,7 +47,7 @@ def _adapter_factory(name: str):
             raise SystemExit(f"cannot load harness {name!r}: {exc}") from exc
         return cls
     raise SystemExit(f"unknown harness {name!r} "
-                     "(built-in: minimal, llm, dsh, aki; or use <module>:<Class>)")
+                     "(built-in: minimal, llm, dsh, pi, aki; or use <module>:<Class>)")
 
 
 def _arm(spec: str):
