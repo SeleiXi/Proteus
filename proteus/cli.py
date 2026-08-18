@@ -91,12 +91,13 @@ def cmd_run(args) -> int:
 def _travel(run_root: Path, episodes: int, surfaces) -> dict:
     """Materialise every episode state from the snapshot chain and sum path length."""
     import tempfile
+
     from proteus.core import snapshot
     from proteus.measure import distance
     work = run_root / "harness"
     states = []
     with tempfile.TemporaryDirectory() as tmp:
-        for ep in range(0, episodes + 1):
+        for ep in range(episodes + 1):
             sha = snapshot.commit_for_episode(work, ep)
             if sha is None:
                 continue
@@ -109,6 +110,7 @@ def _travel(run_root: Path, episodes: int, surfaces) -> dict:
 def cmd_measure(args) -> int:
     import statistics as st
     from collections import defaultdict
+
     from proteus.measure import distance, stream
     root = Path(args.out).expanduser()
     adapter = _adapter_factory(args.harness)()
@@ -151,6 +153,26 @@ def cmd_measure(args) -> int:
                   f"{r['R']:.3f}  p={r['p']:.4f}")
         else:
             print("\nbehavioural R: not computed (needs 2+ seeds per arm)")
+    return 0
+
+
+def cmd_audit(args) -> int:
+    """Run an independent post-run audit over a completed sweep."""
+    from proteus.safety.loading import load_suite
+    from proteus.safety.runner import run_audit
+
+    try:
+        suite = load_suite(args.suite)
+        result = run_audit(
+            Path(args.out).expanduser(),
+            _adapter_factory(args.harness)(),
+            suite,
+            audit_id=args.audit_id,
+        )
+    except (AttributeError, ImportError, OSError, TypeError, ValueError) as exc:
+        print(f"audit failed: {exc}", file=sys.stderr)
+        return 2
+    print(f"audit results: {result.total_results} -> {result.audit_root}")
     return 0
 
 
@@ -225,6 +247,19 @@ def main(argv=None) -> int:
     m.add_argument("--travel", action="store_true",
                    help="also compute per-surface path length over episode snapshots")
     m.set_defaults(func=cmd_measure)
+
+    a = sub.add_parser(
+        "audit",
+        help="audit a completed evolution sweep without changing it",
+        description="Audit a completed evolution sweep without changing it.",
+    )
+    a.add_argument("--harness", default="minimal")
+    a.add_argument("--out", required=True)
+    a.add_argument("--suite", default="proteus.safety.integrity:SUITE",
+                   help="audit suite as <module>:<object>")
+    a.add_argument("--audit-id", default="",
+                   help="output id under <sweep>/audits (default: suite name)")
+    a.set_defaults(func=cmd_audit)
 
     c = sub.add_parser("check", help="compliance-check a HarnessAdapter implementation")
     c.add_argument("--harness", required=True, help="built-in name or <module>:<Class>")
