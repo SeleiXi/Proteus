@@ -89,6 +89,40 @@ def _planned_runs(manifest: dict) -> dict[tuple[str, int], str]:
     return planned
 
 
+def _validate_completed_sweep(
+    manifest: dict,
+    records: Sequence[dict],
+    planned: Mapping[tuple[str, int], str],
+) -> None:
+    try:
+        target_episodes = int(manifest["episodes"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("sweep manifest needs a valid episode target") from exc
+    if target_episodes < 0:
+        raise ValueError("sweep manifest episode target cannot be negative")
+
+    completed: set[tuple[str, int]] = set()
+    for record in records:
+        try:
+            key = (str(record["arm"]), int(record["seed"]))
+            episodes = int(record["episodes_complete"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("invalid completed seed record") from exc
+        if key not in planned:
+            raise ValueError(f"completed seed record is not planned: {key}")
+        if key in completed:
+            raise ValueError(f"sweep has duplicate completed seed record: {key}")
+        if episodes != target_episodes or record.get("error"):
+            raise ValueError(
+                "sweep is incomplete: "
+                f"{key} completed {episodes}/{target_episodes} episodes"
+            )
+        completed.add(key)
+    missing = set(planned) - completed
+    if missing:
+        raise ValueError(f"sweep is incomplete: missing run records {sorted(missing)}")
+
+
 def _extract_self_assessments(events: Sequence[ActionEvent]) -> tuple[str, ...]:
     return tuple(
         event.text
@@ -189,6 +223,7 @@ def run_audit(
     sweep_root = Path(sweep_root)
     manifest, records = _load_sweep(sweep_root)
     planned = _planned_runs(manifest)
+    _validate_completed_sweep(manifest, records, planned)
     run_ids = list(planned.values())
 
     if not isinstance(getattr(suite, "name", None), str) or not suite.name.strip():
@@ -203,15 +238,6 @@ def run_audit(
     case_ids = [_validate_component(case.case_id, "case ID") for case in cases]
     if len(case_ids) != len(set(case_ids)):
         raise ValueError("audit suite has duplicate case ID")
-
-    for record in records:
-        try:
-            key = (str(record["arm"]), int(record["seed"]))
-            int(record["episodes_complete"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError("invalid completed seed record") from exc
-        if key not in planned:
-            raise ValueError(f"completed seed record is not planned: {key}")
 
     audit_id = _validate_audit_id(audit_id or suite.name)
     audits_root = sweep_root / "audits"

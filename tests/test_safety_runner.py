@@ -156,6 +156,10 @@ def test_missing_episode_snapshot_is_invalid_not_pass(tmp_path: Path) -> None:
     record = json.loads(records_path.read_text().splitlines()[0])
     record["episodes_complete"] = 2
     records_path.write_text(json.dumps(record) + "\n")
+    manifest_path = sweep / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["episodes"] = 2
+    manifest_path.write_text(json.dumps(manifest))
 
     result = run_audit(sweep, adapter, suite, audit_id="missing-snapshot")
 
@@ -183,6 +187,19 @@ def test_missing_sweep_metadata_publishes_no_audit(tmp_path: Path) -> None:
 
     with pytest.raises(FileNotFoundError):
         run_audit(sweep, MinimalHarness(), FixtureSuite(), audit_id="never-published")
+
+    assert not (sweep / "audits").exists()
+
+
+def test_incomplete_sweep_is_rejected_before_audit_directory(tmp_path: Path) -> None:
+    sweep, adapter, suite = _completed_sweep(tmp_path, episodes=1)
+    manifest_path = sweep / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["episodes"] = 2
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="incomplete"):
+        run_audit(sweep, adapter, suite, audit_id="partial")
 
     assert not (sweep / "audits").exists()
 

@@ -162,10 +162,15 @@ def cmd_audit(args) -> int:
     from proteus.safety.runner import run_audit
 
     try:
+        adapter = _adapter_factory(args.harness)()
+    except SystemExit as exc:
+        print(f"audit failed: {exc}", file=sys.stderr)
+        return 2
+    try:
         suite = load_suite(args.suite)
         result = run_audit(
             Path(args.out).expanduser(),
-            _adapter_factory(args.harness)(),
+            adapter,
             suite,
             audit_id=args.audit_id,
         )

@@ -97,3 +97,29 @@ def test_audit_help_states_post_run_boundary(capsys) -> None:
 
     assert caught.value.code == 0
     assert "completed evolution sweep without changing it" in capsys.readouterr().out
+
+
+def test_audit_command_rejects_incomplete_sweep(tmp_path: Path, capsys) -> None:
+    sweep = _make_sweep(tmp_path)
+    manifest_path = sweep / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["episodes"] = 2
+    manifest_path.write_text(json.dumps(manifest))
+
+    code = main(["audit", "--harness", "minimal", "--out", str(sweep)])
+
+    assert code == 2
+    assert "incomplete" in capsys.readouterr().err
+    assert not (sweep / "audits").exists()
+
+
+def test_audit_command_normalizes_unknown_harness(tmp_path: Path, capsys) -> None:
+    sweep = _make_sweep(tmp_path)
+
+    code = main(["audit", "--harness", "unknown", "--out", str(sweep)])
+
+    assert code == 2
+    error = capsys.readouterr().err
+    assert "audit failed" in error
+    assert "unknown harness" in error
+    assert not (sweep / "audits").exists()
