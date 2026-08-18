@@ -33,6 +33,7 @@ _PAGE = """<!doctype html>
 body { background:var(--bg); color:var(--ink);
        font:14px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif; padding:24px }
 h1 { font-size:18px; letter-spacing:.04em }
+h2 { font-size:16px; letter-spacing:.03em; margin-top:28px }
 .sub { color:var(--sub); margin:4px 0 20px }
 table { width:100%; border-collapse:collapse; background:var(--card);
         border:1px solid var(--line); border-radius:8px; overflow:hidden }
@@ -48,6 +49,7 @@ th { border-top:none; color:var(--sub); font-weight:600; font-size:12px;
        border:1px solid var(--line); color:var(--sub) }
 .done { color:var(--accent); border-color:var(--accent) }
 .bad  { color:var(--bad); border-color:var(--bad) }
+.audit-links a { color:var(--accent); margin-right:10px }
 footer { color:var(--sub); margin-top:16px; font-size:12px }
 </style>
 </head>
@@ -58,6 +60,14 @@ footer { color:var(--sub); margin-top:16px; font-size:12px }
 <th>arm</th><th>seed</th><th>progress</th><th>episodes</th><th>tool calls</th>
 <th>units by surface</th><th>growth</th><th>last score</th><th>status</th>
 </tr></thead><tbody id="rows"></tbody></table>
+<section id="audit-section" hidden>
+<h2>Safety audits</h2>
+<div class="sub">post-run evidence; never fed back into evolution</div>
+<table><thead><tr>
+<th>audit</th><th>suite</th><th>status counts</th><th>targets</th>
+<th>evidence methods</th><th>artifacts</th>
+</tr></thead><tbody id="audit-rows"></tbody></table>
+</section>
 <footer id="foot"></footer>
 <script>
 async function jl(u){ const r = await fetch(u,{cache:"no-store"});
@@ -74,6 +84,47 @@ function spark(recs, key){
     return `<polyline fill="none" stroke="var(--accent)" stroke-opacity="${1-i*0.35}"
       stroke-width="1.5" stroke-dasharray="${dash}" points="${pts.join(" ")}"/>`; };
   return `<svg class="spark" viewBox="0 0 ${W} ${H}">${names.map(line).join("")}</svg>`;
+}
+async function maybeJson(u){
+  try { const r = await fetch(u,{cache:"no-store"}); return r.ok ? await r.json() : null; }
+  catch(e) { return null; }
+}
+function countText(value){
+  const entries = Object.entries(value||{});
+  return entries.length ? entries.map(([k,v])=>`${k}:${v}`).join("  ") : "—";
+}
+function textCell(row, value){
+  const cell = document.createElement("td");
+  cell.textContent = value;
+  row.appendChild(cell);
+}
+async function loadAudits(){
+  const index = await maybeJson("audits/index.json");
+  if(!index || !Array.isArray(index.audits) || !index.audits.length) return;
+  const body = document.getElementById("audit-rows");
+  for(const audit of index.audits){
+    if(typeof audit.summary !== "string" || audit.summary.includes("..")) continue;
+    const summary = await maybeJson(`audits/${audit.summary}`);
+    if(!summary) continue;
+    const row = document.createElement("tr");
+    textCell(row, String(audit.id||"—"));
+    textCell(row, `${audit.suite||"—"} ${audit.version||""}`.trim());
+    textCell(row, countText(summary.status_counts));
+    textCell(row, countText(summary.target_counts));
+    textCell(row, countText(summary.evidence_method_counts));
+    const links = document.createElement("td");
+    links.className = "audit-links";
+    for(const [label,path] of [["summary",audit.summary],["results",audit.results]]){
+      if(typeof path !== "string" || path.includes("..")) continue;
+      const link = document.createElement("a");
+      link.href = `audits/${path}`;
+      link.textContent = label;
+      links.appendChild(link);
+    }
+    row.appendChild(links);
+    body.appendChild(row);
+  }
+  if(body.children.length) document.getElementById("audit-section").hidden = false;
 }
 async function tick(){
   const m = await (await fetch("manifest.json",{cache:"no-store"})).json();
@@ -103,7 +154,7 @@ async function tick(){
   document.getElementById("foot").textContent =
     `refreshed ${new Date().toLocaleTimeString()} — polls every 5s while the sweep runs`;
 }
-tick(); setInterval(tick, 5000);
+tick(); loadAudits(); setInterval(tick, 5000);
 </script>
 </body>
 </html>
