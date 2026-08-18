@@ -475,15 +475,18 @@ proteus measure --harness minimal --out runs/demo</pre>
          font-family="SF Mono,ui-monospace,monospace">tool calls / episode</text>`;
   }
 
-  // ---- ambient life: dwell on a breathing dot, then launch a line to the next
-  const EP_MS = 30000, LINE_MS = 3800;
-  let cur = 0, stepIdx = 0, flight = null;   // flight = {t0}
+  // ---- the broadcast clock: position is derived from wall time, so every visitor
+  // sees the same moment of the same loop, and a refresh lands mid-stream
+  const EP_MS = 30000, LINE_MS = 3800, DWELL = EP_MS - LINE_MS;
+  const CYCLE = N * EP_MS;
+  const T0 = Date.UTC(2026, 0, 1);          // fixed epoch: the schedule is global
   const grow = document.getElementById("tj-grow");
   const lineEl = document.getElementById("tj-line");
   function syncLine(upto) {
     lineEl.setAttribute("points",
       EPS.slice(0, upto + 1).map((_, k) => `${px(k)},${py(k)}`).join(" "));
   }
+  let lastEp = -1, lastStep = -1;
   function setCur(i) {
     cur = i;
     [...dots.children].forEach((c, k) => {
@@ -495,47 +498,43 @@ proteus measure --harness minimal --out runs/demo</pre>
     document.getElementById("case-foot").textContent =
       `${C.meta.kind} · ep ${EPS[i].ep}/${N} · ${EPS[i].steps.length} tool calls · ` +
       `memory ${u.memory} · skills ${u.skills} · tools ${u.tools}`;
-    stepIdx = 0;
-    if (mode === "follow") { tgt.x = px(i); tgt.y = py(i); }
   }
-  function launch() {
-    if (flight) return;
-    if (cur >= N - 1) {          // loop the replay
-      setCur(0); return;
-    }
-    flight = {t0: performance.now()};
-    grow.setAttribute("x1", px(cur)); grow.setAttribute("y1", py(cur));
-    grow.setAttribute("opacity", 1);
-    document.getElementById("tick-line").textContent =
-      `live · episode ${EPS[cur+1].ep} begins…`;
-  }
+  let cur = 0;
   const ease = k => k < .5 ? 2*k*k : 1 - Math.pow(-2*k + 2, 2) / 2;
 
-  // ---- ticker: the current episode's real steps paced across the dwell
-  function tickStep() {
-    if (flight) return;
-    const steps = EPS[cur].steps;
-    if (!steps.length) return;
-    const [ph, tool, tg] = steps[stepIdx % steps.length];
-    document.getElementById("tick-line").textContent =
-      `live · ${ph} · ${tool}${tg ? " → " + tg : ""}`;
-    stepIdx++;
-  }
-  setInterval(tickStep, Math.max((EP_MS - LINE_MS) / 90, 300));
-  if (!reduced()) setInterval(launch, EP_MS);
-
-  // ---- main loop
-  function frame(now) {
-    if (flight) {
-      const k = Math.min((now - flight.t0) / LINE_MS, 1);
-      const e = ease(k);
-      const tx = px(cur) + (px(cur+1) - px(cur)) * e;
-      const ty = py(cur) + (py(cur+1) - py(cur)) * e;
+  // ---- main loop: everything is a pure function of the broadcast clock
+  function frame() {
+    const t = (Date.now() - T0) % CYCLE;
+    const ep = Math.floor(t / EP_MS);
+    const intra = t - ep * EP_MS;
+    if (ep !== lastEp) { setCur(ep); lastEp = ep; lastStep = -1; }
+    const flying = intra > DWELL && ep < N - 1;
+    if (flying) {
+      const e = ease((intra - DWELL) / LINE_MS);
+      const tx = px(ep) + (px(ep+1) - px(ep)) * e;
+      const ty = py(ep) + (py(ep+1) - py(ep)) * e;
+      grow.setAttribute("x1", px(ep)); grow.setAttribute("y1", py(ep));
       grow.setAttribute("x2", tx); grow.setAttribute("y2", ty);
+      grow.setAttribute("opacity", 1);
       if (mode === "follow") { tgt.x = tx; tgt.y = ty; }
-      if (k >= 1) {
-        flight = null; grow.setAttribute("opacity", 0);
-        setCur(cur + 1);
+      if (lastStep !== -2) {
+        document.getElementById("tick-line").textContent =
+          `live · episode ${EPS[ep+1].ep} begins…`;
+        lastStep = -2;
+      }
+    } else {
+      grow.setAttribute("opacity", 0);
+      if (mode === "follow") { tgt.x = px(ep); tgt.y = py(ep); }
+      const steps = EPS[ep].steps;
+      if (steps.length) {
+        const si = Math.min(steps.length - 1,
+          Math.floor(intra / DWELL * steps.length));
+        if (si !== lastStep) {
+          const [ph, tool, tg] = steps[si];
+          document.getElementById("tick-line").textContent =
+            `live · ${ph} · ${tool}${tg ? " → " + tg : ""}`;
+          lastStep = si;
+        }
       }
     }
     const a = reduced() ? 1 : 0.055;
@@ -649,14 +648,20 @@ proteus measure --harness minimal --out runs/demo</pre>
     if (domeEp < N-1) { domeEp++; renderDome(); } };
   document.addEventListener("keydown", e => { if (e.key === "Escape") closeDome(); });
 
-  // ---- go
-  setCur(0); styleForMode(); applyCam(); tickStep();
-  requestAnimationFrame(frame);
-  if (reduced()) { mode = "over";
+  // ---- go: land wherever the broadcast is right now
+  if (reduced()) {
+    mode = "over";
     tgt = {x: WORLD_W/2, y: (TOP+BOT)/2, s: S_OVER};
-    cam = {...tgt}; styleForMode(); applyCam();
+    cam = {...tgt};
+    styleForMode();
     [...dots.children].forEach(c => c.style.display = "");
-    syncLine(N-1);
+    syncLine(N - 1);
+    setCur(N - 1);
+    [...dots.children].forEach(c => c.style.display = "");
+    applyCam();
+  } else {
+    styleForMode();
+    frame();
   }
 })();
 </script>
