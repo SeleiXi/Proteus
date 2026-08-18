@@ -18,8 +18,9 @@
 </header>
 
 <div class="hero">
+  <div class="kicker micro">an open instrument · est. 2026 · MIT</div>
   <img class="logo" src="assets/proteus-logo.png" alt="Proteus">
-  <h1>Self-evolution for any agent harness.</h1>
+  <h1>Self-evolution for <em>any</em> agent harness.</h1>
   <div class="slog">Plug in. Evolve. Measure.</div>
   <div class="cta">
     <a class="btn primary" href="playground.html">Launch Playground</a>
@@ -49,18 +50,19 @@
   </div>
 
   <h2>The evolve loop</h2>
-  <div class="card" style="text-align:center">
+  <div class="print" style="text-align:center">
     <img src="assets/proteus-architecture.png" alt="The Proteus evolve loop"
          style="max-width:100%; border-radius:6px">
   </div>
 
-  <h2>60-second local demo (no key, no Docker)</h2>
+  <h2>60-second demo · no key · no docker</h2>
   <pre class="cmd">pip install proteus-evolve   # or: git clone github.com/yichen14/Proteus && pip install -e .
 proteus run --harness minimal --arm neutral --arm review:notes --arm review:tools \
     --seeds 4 --episodes 8 --out runs/demo
 proteus measure --harness minimal --out runs/demo</pre>
 </div>
 
-<footer class="site">Proteus — MIT — <a href="https://github.com/yichen14/Proteus">github.com/yichen14/Proteus</a></footer>
+<footer class="site">Proteus · plug in / evolve / measure ·
+<a href="https://github.com/yichen14/Proteus">github.com/yichen14/Proteus</a></footer>
 </body>
 </html>

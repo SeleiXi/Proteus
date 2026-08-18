@@ -17,11 +17,11 @@
 </header>
 
 <div class="wrap">
-  <h2>Playground — configure a self-evolution run</h2>
+  <h2>Playground · configure a run</h2>
   <div id="backend-banner" class="banner">checking backend…</div>
 
-  <div class="card">
-    <h3>1 · Harness</h3>
+  <div class="formcard">
+    <h3>01 · Harness</h3>
     <div class="row">
       <div>
         <label>harness</label>
@@ -43,8 +43,8 @@
     </div>
   </div>
 
-  <div class="card" id="model-card">
-    <h3>2 · Model &amp; key</h3>
+  <div class="formcard" id="model-card">
+    <h3>02 · Model &amp; key</h3>
     <div class="row">
       <div><label>model</label><input id="model" placeholder="deepseek-v4-flash"></div>
       <div><label>base URL (llm harness only)</label>
@@ -55,16 +55,16 @@
     <input id="key" type="password" placeholder="sk-…">
   </div>
 
-  <div class="card">
-    <h3>3 · Arms (action-preference injection)</h3>
+  <div class="formcard">
+    <h3>03 · Arms · action-preference injection</h3>
     <div id="arms"></div>
     <a href="#" id="add-arm">+ add arm</a>
     <div class="muted" style="margin-top:8px">Each arm is one condition: a removable
     disposition installed at episode 0. <code>neutral</code> is the control.</div>
   </div>
 
-  <div class="card">
-    <h3>4 · Goal &amp; evaluator</h3>
+  <div class="formcard">
+    <h3>04 · Goal &amp; evaluator</h3>
     <div class="row">
       <div>
         <label>mode</label>
@@ -116,8 +116,7 @@
   <pre class="cmd" id="cmd-out" style="display:none"></pre>
 </div>
 
-<footer class="site">Runs are capped (arms ≤ 3, seeds ≤ 2, episodes ≤ 8) and queued —
-the backend runs a bounded number of sweeps at once.</footer>
+<footer class="site">caps: arms ≤ 3 · seeds ≤ 2 · episodes ≤ 8 · bounded concurrency</footer>
 
 <script>
 const API = localStorage.getItem("proteus_api")

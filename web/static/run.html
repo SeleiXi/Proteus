@@ -19,10 +19,18 @@
 <div class="wrap">
   <h2>Run <span id="rid" class="muted"></span></h2>
   <div id="status" class="banner">loading…</div>
-  <table id="tbl" style="display:none"><thead><tr>
-    <th>arm</th><th>seed</th><th>progress</th><th>episodes</th>
-    <th>units by surface</th><th>growth</th><th>last score</th><th>status</th>
-  </tr></thead><tbody id="rows"></tbody></table>
+  <div class="legend" id="legend" style="display:none">
+    <span class="micro cap">fabric · one cell per episode · colour = surface grown most</span>
+    <span class="micro"><i class="sw" style="background:var(--s-notes)"></i>notes</span>
+    <span class="micro"><i class="sw" style="background:var(--s-tools)"></i>tools</span>
+    <span class="micro"><i class="sw" style="background:var(--s-skills)"></i>skills</span>
+    <span class="micro"><i class="sw" style="background:var(--s-instr)"></i>instructions</span>
+    <span class="micro"><i class="sw" style="background:var(--s-none)"></i>no growth</span>
+  </div>
+  <div class="tblwrap"><table id="tbl" style="display:none"><thead><tr>
+    <th>arm</th><th>seed</th><th>progress</th><th>ep</th>
+    <th>fabric</th><th>units</th><th>score</th><th>status</th>
+  </tr></thead><tbody id="rows"></tbody></table></div>
   <div class="muted" id="foot" style="margin-top:10px"></div>
 </div>
 
@@ -40,18 +48,32 @@ async function jl(u) {
     return (await r.text()).split("\n").filter(Boolean).map(JSON.parse);
   } catch (e) { return []; }
 }
-function spark(recs) {
-  if (!recs.length) return "";
-  const names = Object.keys(recs[recs.length-1].units || {});
-  const W = 140, H = 26, n = recs.length;
-  let max = 1;
-  recs.forEach(r => names.forEach(s => max = Math.max(max, (r.units||{})[s]||0)));
-  return `<svg class="spark" viewBox="0 0 ${W} ${H}">` + names.map((s,i) => {
-    const pts = recs.map((r,j) =>
-      `${(j/Math.max(n-1,1))*W},${H-2-((r.units||{})[s]||0)/max*(H-6)}`);
-    return `<polyline fill="none" stroke="var(--accent)" stroke-opacity="${1-i*0.3}"
-      stroke-width="1.5" ${i%2?'stroke-dasharray="3,2"':''} points="${pts.join(" ")}"/>`;
-  }).join("") + "</svg>";
+const SURF = {notes:"--s-notes", tools:"--s-tools", skills:"--s-skills",
+              instructions:"--s-instr"};
+function fabric(recs, target) {
+  // per-episode delta of units per surface; cell = dominant surface, opacity = magnitude
+  const cells = [];
+  let prev = {};
+  const byEp = {};
+  recs.forEach(r => byEp[r.episode] = r.units || {});
+  for (let ep = 1; ep <= target; ep++) {
+    const cur = byEp[ep];
+    if (!cur) { cells.push(`<i title="ep ${ep}: pending" style="opacity:.25"></i>`); continue; }
+    let best = null, bestD = 0, total = 0;
+    for (const s of Object.keys(cur)) {
+      const d = (cur[s]||0) - (prev[s]||0);
+      total += Math.max(d, 0);
+      if (d > bestD) { bestD = d; best = s; }
+    }
+    prev = cur;
+    if (!best) cells.push(`<i title="ep ${ep}: no growth"></i>`);
+    else {
+      const op = Math.min(1, .45 + bestD * .18);
+      cells.push(`<i title="ep ${ep}: +${bestD} ${best} (${total} total)"
+        style="background:var(${SURF[best]||"--s-none"});opacity:${op}"></i>`);
+    }
+  }
+  return `<div class="fabric">${cells.join("")}</div>`;
 }
 
 async function tick() {
@@ -80,6 +102,7 @@ async function tick() {
     manifest = await r.json();
   } catch (e) { return; }
   document.getElementById("tbl").style.display = "";
+  document.getElementById("legend").style.display = "";
   const rows = [];
   for (const r of manifest.runs) {
     const recs = await jl(`${API}/api/runs/${id}/progress/${r.id}.jsonl`);
@@ -92,10 +115,10 @@ async function tick() {
     const status = errored ? `<span class="tag bad">error</span>`
       : ep >= tgt ? `<span class="tag done">complete</span>`
       : ep > 0 ? `<span class="tag">running</span>` : `<span class="tag">pending</span>`;
-    rows.push(`<tr><td>${r.arm}</td><td>${r.seed}</td>
+    rows.push(`<tr><td>${r.arm}</td><td class="mono">${r.seed}</td>
       <td><div class="bar ${errored?"err":""}"><i style="width:${Math.round(100*ep/tgt)}%"></i></div></td>
-      <td>${ep}/${tgt}</td><td>${units}</td><td>${spark(recs)}</td>
-      <td>${score}</td><td>${status}</td></tr>`);
+      <td class="mono">${ep}/${tgt}</td><td>${fabric(recs, tgt)}</td>
+      <td class="mono">${units}</td><td class="mono">${score}</td><td>${status}</td></tr>`);
   }
   document.getElementById("rows").innerHTML = rows.join("");
   document.getElementById("foot").textContent =
