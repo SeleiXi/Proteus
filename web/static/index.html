@@ -27,73 +27,220 @@
     <a class="btn" href="https://github.com/yichen14/Proteus">Star on GitHub</a>
   </div>
 
-  <a class="specimen" href="demo.html" id="specimen">
-    <div class="micro sp-head"><span class="sp-dot"></span>a harness, evolving ·
-      simulated replay · click to open</div>
-    <div id="sp-rows"></div>
-    <div class="micro sp-foot" id="sp-foot"></div>
+  <a href="#" class="case" id="case-stage">
+    <div class="micro sp-head"><span class="sp-dot"></span>
+      <span id="case-head">a real run, replaying · one episode every 30s ·
+      click any dot to step inside</span></div>
+    <svg id="traj" viewBox="0 0 640 150" aria-label="evolution trajectory"></svg>
+    <div class="micro" id="tick-line"></div>
+    <div class="micro sp-foot" id="case-foot"></div>
   </a>
 </div>
 
+<div id="dome-overlay">
+  <div class="dome-top">
+    <span class="micro" id="dome-title"></span>
+    <span class="dome-nav">
+      <a href="#" id="dome-prev">‹ prev</a>
+      <a href="#" id="dome-next">next ›</a>
+      <a href="#" id="dome-close">✕ close</a>
+    </span>
+  </div>
+  <div class="dome-grid">
+    <div class="dome-side">
+      <h3>setup</h3>
+      <div class="kv" id="dome-setup"></div>
+    </div>
+    <div class="dome-stage">
+      <div class="dome" id="dome">
+        <div class="micro" id="dome-phase"></div>
+        <div id="dome-feed"></div>
+      </div>
+    </div>
+    <div class="dome-side">
+      <h3>measurement · this episode</h3>
+      <div class="kv" id="dome-meas"></div>
+    </div>
+  </div>
+</div>
+
 <style>
-.specimen { display:block; max-width:560px; margin:52px auto 0; text-align:left;
-  border:1px solid var(--rule); background:var(--panel); padding:16px 18px;
-  text-decoration:none }
-.specimen:hover { border-color:var(--anchor); text-decoration:none }
-.sp-head { display:flex; align-items:center; gap:8px; margin-bottom:12px }
+:root { --s-memory:#4F6DF5 }
+.case { display:block; max-width:660px; margin:52px auto 0; text-align:left;
+  border:1px solid var(--rule); background:var(--panel); padding:16px 18px 12px;
+  text-decoration:none; color:var(--ink) }
+.case:hover { border-color:var(--anchor); text-decoration:none }
+.sp-head { display:flex; align-items:center; gap:8px; margin-bottom:10px }
 .sp-dot { width:7px; height:7px; border-radius:50%; background:var(--anchor-hi);
-  animation:pulse 1.6s ease-in-out infinite }
+  animation:pulse 1.6s ease-in-out infinite; flex:none }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
 @media (prefers-reduced-motion: reduce){ .sp-dot{animation:none} }
-.sp-row { display:flex; align-items:center; gap:12px; margin:7px 0 }
-.sp-row .micro { width:104px; flex:none }
-.sp-row .fabric i { width:14px; height:18px }
-.sp-foot { margin-top:12px; color:var(--dim) }
+#traj { width:100%; display:block }
+#traj .axis { stroke:var(--rule) }
+#traj .tline { stroke:var(--soft); fill:none; stroke-width:1 }
+#traj circle { cursor:pointer }
+#traj circle.cur { animation:pulse 1.6s infinite }
+#tick-line { min-height:17px; color:var(--anchor-hi) }
+.sp-foot { margin-top:8px; color:var(--dim) }
+
+#dome-overlay { position:fixed; inset:0; background:var(--bg); z-index:50;
+  display:none; flex-direction:column; padding:18px 22px; overflow-y:auto }
+#dome-overlay.on { display:flex }
+.dome-top { display:flex; justify-content:space-between; align-items:center;
+  margin-bottom:8px }
+.dome-nav a { margin-left:18px; font:12px "SF Mono",ui-monospace,monospace;
+  letter-spacing:.1em; text-transform:uppercase }
+.dome-grid { flex:1; display:grid; grid-template-columns:220px 1fr 220px; gap:26px;
+  align-items:end; max-width:1200px; margin:0 auto; width:100% }
+@media (max-width:900px){ .dome-grid { grid-template-columns:1fr; align-items:start } }
+.dome-side { padding-bottom:4vh }
+.dome-side .kv { font-size:13px }
+.dome-side .kv .micro { display:block; margin:10px 0 1px }
+.dome-stage { display:flex; justify-content:center }
+.dome { width:min(92vw,680px); height:min(46vw,340px); position:relative;
+  border:1px solid var(--soft); border-bottom:none;
+  border-radius:min(46vw,340px) min(46vw,340px) 0 0;
+  background:var(--panel); overflow:hidden;
+  display:flex; flex-direction:column; align-items:center; justify-content:flex-end }
+#dome-phase { position:absolute; top:12%; letter-spacing:.3em;
+  color:var(--anchor-hi) }
+#dome-feed { width:72%; max-height:62%; overflow:hidden; font:12.5px/1.9 "SF Mono",
+  ui-monospace,monospace; padding-bottom:14px; mask-image:linear-gradient(
+  to bottom, transparent, black 18%) }
+#dome-feed .st { display:flex; gap:10px; align-items:baseline }
+#dome-feed .st .ph { color:var(--dim); width:64px; flex:none; font-size:10.5px;
+  text-transform:uppercase; letter-spacing:.08em }
+#dome-feed .st .tg { color:var(--soft) }
+#dome-feed .st.w .tl { color:var(--anchor-hi) }
+.meas-bar { height:5px; background:var(--anchor); margin:3px 0 8px }
 </style>
-<script src="assets/demo-data.js"></script>
+<script src="assets/case-data.js"></script>
 <script>
 (() => {
-  const SURF = {notes:"--s-notes", tools:"--s-tools"};
-  const rowsEl = document.getElementById("sp-rows");
-  const total = window.DEMO.meta.episodes;
-  const rows = window.DEMO.arms.map(a => {
-    const d = document.createElement("div");
-    d.className = "sp-row";
-    d.innerHTML = `<span class="micro">${a.arm}</span>
-      <div class="fabric">${Array.from({length: total}, () => "<i></i>").join("")}</div>
-      <span class="micro sp-units"></span>`;
-    rowsEl.appendChild(d);
-    return d;
+  const C = window.CASE, EPS = C.episodes, N = EPS.length;
+  const SURF = {memory:"var(--s-memory)", skills:"var(--s-skills)", tools:"var(--s-tools)"};
+  const WRITE = /write|edit|update|append/;
+  const svg = document.getElementById("traj");
+  const W = 640, H = 150, PAD = 26;
+  const maxU = Math.max(...EPS.map(e => e.units.memory + e.units.skills + e.units.tools));
+  const xy = i => [PAD + i*(W-2*PAD)/(N-1),
+    H-18 - (EPS[i].units.memory+EPS[i].units.skills+EPS[i].units.tools)/maxU*(H-42)];
+  const dom = i => {
+    const e = EPS[i], p = i ? EPS[i-1].units : {memory:0,skills:0,tools:0};
+    let best = "memory", bd = -1;
+    for (const s of Object.keys(e.units)) {
+      const d = e.units[s]-p[s]; if (d > bd) { bd = d; best = s; }
+    }
+    return bd > 0 ? SURF[best] : "var(--s-none)";
+  };
+  svg.innerHTML = `<line class="axis" x1="${PAD}" y1="${H-18}" x2="${W-PAD}" y2="${H-18}"/>
+    <text x="${PAD}" y="${H-4}" class="micro" fill="var(--dim)" font-size="9">ep 1</text>
+    <text x="${W-PAD}" y="${H-4}" text-anchor="end" class="micro" fill="var(--dim)"
+      font-size="9">ep ${N}</text>
+    <polyline class="tline" id="tj-line" points=""/>
+    <g id="tj-dots"></g>`;
+  const dots = document.getElementById("tj-dots");
+  EPS.forEach((e,i) => {
+    const [x,y] = xy(i);
+    const c = document.createElementNS("http://www.w3.org/2000/svg","circle");
+    c.setAttribute("cx",x); c.setAttribute("cy",y); c.setAttribute("r",4.2);
+    c.setAttribute("fill", dom(i)); c.dataset.i = i; c.style.display = "none";
+    c.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation();
+      openDome(i); });
+    dots.appendChild(c);
   });
-  let t = 0;
-  function paint() {
-    const upto = t % (total + 3);   // brief hold at the end, then loop
-    window.DEMO.arms.forEach((a, ri) => {
-      const cells = rows[ri].querySelectorAll(".fabric i");
-      let prev = {};
-      a.episodes.forEach((e, j) => {
-        const c = cells[j];
-        if (j >= upto) { c.style.background = ""; c.style.opacity = ".25"; return; }
-        let best = null, bd = 0;
-        for (const s of Object.keys(e.units)) {
-          const d = (e.units[s]||0) - (prev[s]||0);
-          if (d > bd) { bd = d; best = s; }
-        }
-        prev = e.units;
-        c.style.opacity = j === upto - 1 ? "1" : ".85";
-        c.style.background = best ? `var(${SURF[best]})` : "var(--s-none)";
-      });
-      const last = a.episodes[Math.max(0, Math.min(upto, total) - 1)];
-      rows[ri].querySelector(".sp-units").textContent = upto
-        ? `n${last.units.notes} t${last.units.tools}` : "";
+
+  // ---- ambient clock: one episode per 30s, ticker steps through real steps
+  let cur = 0, stepIdx = 0, stepTimer = null;
+  const EP_MS = 30000;
+  function reveal(n) {
+    [...dots.children].forEach((c,i) => {
+      c.style.display = i <= n ? "" : "none";
+      c.classList.toggle("cur", i === n);
     });
-    document.getElementById("sp-foot").textContent =
-      `episode ${Math.min(upto, total)}/${total} · ${window.DEMO.meta.harness} · goal: none`;
-    t++;
+    document.getElementById("tj-line").setAttribute("points",
+      EPS.slice(0, n+1).map((_,i) => xy(i).join(",")).join(" "));
+    const u = EPS[n].units;
+    document.getElementById("case-foot").textContent =
+      `${C.meta.kind} · ep ${EPS[n].ep}/${N} · memory ${u.memory} · skills ${u.skills}` +
+      ` · tools ${u.tools} · ${C.meta.arm}`;
   }
-  paint();
+  function tickStep() {
+    const steps = EPS[cur].steps;
+    if (!steps.length) return;
+    const [ph, tool, tgt] = steps[stepIdx % steps.length];
+    document.getElementById("tick-line").textContent =
+      `live · ${ph} · ${tool}${tgt ? " → " + tgt : ""}`;
+    stepIdx++;
+  }
+  function startEpisode(i) {
+    cur = i; stepIdx = 0; reveal(i);
+    clearInterval(stepTimer);
+    const steps = Math.max(EPS[i].steps.length, 1);
+    stepTimer = setInterval(tickStep, Math.max(EP_MS/steps, 350));
+    tickStep();
+  }
+  startEpisode(0);
   if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
-    setInterval(paint, 900);
+    setInterval(() => startEpisode((cur+1) % N), EP_MS);
+
+  // ---- the dome
+  const ov = document.getElementById("dome-overlay");
+  let domeEp = 0, feedTimer = null;
+  function openDome(i) {
+    domeEp = i; ov.classList.add("on"); renderDome();
+  }
+  function closeDome() { ov.classList.remove("on"); clearInterval(feedTimer); }
+  function renderDome() {
+    const e = EPS[domeEp];
+    document.getElementById("dome-title").textContent =
+      `episode ${e.ep} of ${N} · ${C.meta.kind}`;
+    const m = C.meta;
+    document.getElementById("dome-setup").innerHTML = [
+      ["harness", m.harness], ["model", m.model], ["arm", m.arm],
+      ["goal", m.goal], ["sandbox", m.sandbox], ["note", m.disclosure],
+    ].map(([k,v]) => `<span class="micro">${k}</span>${v}`).join("");
+    const counts = {};
+    e.steps.forEach(s => counts[s[1]] = (counts[s[1]]||0) + 1);
+    const top = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0,5);
+    const mx = top.length ? top[0][1] : 1;
+    document.getElementById("dome-meas").innerHTML = `
+      <span class="micro">state after</span>
+      memory ${e.units.memory} · skills ${e.units.skills} · tools ${e.units.tools}
+      <span class="micro">Δ this episode</span>
+      +${e.d.a} added · ${e.d.r} revised · ${e.d.d} dropped
+      <span class="micro">tool calls</span>${e.steps.length}
+      <span class="micro">top tools</span>` +
+      top.map(([t,n]) => `<div>${t} · ${n}
+        <div class="meas-bar" style="width:${Math.round(100*n/mx)}%"></div></div>`).join("");
+    // replay the feed
+    const feed = document.getElementById("dome-feed");
+    feed.innerHTML = "";
+    clearInterval(feedTimer);
+    let j = 0;
+    const ms = Math.max(120, Math.min(400, 12000 / e.steps.length));
+    feedTimer = setInterval(() => {
+      if (j >= e.steps.length) { clearInterval(feedTimer); return; }
+      const [ph, tool, tgt] = e.steps[j++];
+      document.getElementById("dome-phase").textContent = ph.toUpperCase();
+      const d = document.createElement("div");
+      d.className = "st" + (WRITE.test(tool) ? " w" : "");
+      d.innerHTML = `<span class="ph">${ph}</span>
+        <span class="tl">${tool}</span><span class="tg">${tgt || ""}</span>`;
+      feed.appendChild(d);
+      feed.scrollTop = feed.scrollHeight;
+      while (feed.children.length > 14) feed.removeChild(feed.firstChild);
+    }, ms);
+  }
+  document.getElementById("dome-close").onclick = e => { e.preventDefault(); closeDome(); };
+  document.getElementById("dome-prev").onclick = e => { e.preventDefault();
+    if (domeEp > 0) { domeEp--; renderDome(); } };
+  document.getElementById("dome-next").onclick = e => { e.preventDefault();
+    if (domeEp < N-1) { domeEp++; renderDome(); } };
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeDome(); });
+  document.getElementById("case-stage").addEventListener("click", e => {
+    e.preventDefault(); openDome(cur);
+  });
 })();
 </script>
 
