@@ -26,7 +26,76 @@
     <a class="btn primary" href="playground.html">Launch Playground</a>
     <a class="btn" href="https://github.com/yichen14/Proteus">Star on GitHub</a>
   </div>
+
+  <a class="specimen" href="demo.html" id="specimen">
+    <div class="micro sp-head"><span class="sp-dot"></span>a harness, evolving ·
+      simulated replay · click to open</div>
+    <div id="sp-rows"></div>
+    <div class="micro sp-foot" id="sp-foot"></div>
+  </a>
 </div>
+
+<style>
+.specimen { display:block; max-width:560px; margin:52px auto 0; text-align:left;
+  border:1px solid var(--rule); background:var(--panel); padding:16px 18px;
+  text-decoration:none }
+.specimen:hover { border-color:var(--anchor); text-decoration:none }
+.sp-head { display:flex; align-items:center; gap:8px; margin-bottom:12px }
+.sp-dot { width:7px; height:7px; border-radius:50%; background:var(--anchor-hi);
+  animation:pulse 1.6s ease-in-out infinite }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+@media (prefers-reduced-motion: reduce){ .sp-dot{animation:none} }
+.sp-row { display:flex; align-items:center; gap:12px; margin:7px 0 }
+.sp-row .micro { width:104px; flex:none }
+.sp-row .fabric i { width:14px; height:18px }
+.sp-foot { margin-top:12px; color:var(--dim) }
+</style>
+<script src="assets/demo-data.js"></script>
+<script>
+(() => {
+  const SURF = {notes:"--s-notes", tools:"--s-tools"};
+  const rowsEl = document.getElementById("sp-rows");
+  const total = window.DEMO.meta.episodes;
+  const rows = window.DEMO.arms.map(a => {
+    const d = document.createElement("div");
+    d.className = "sp-row";
+    d.innerHTML = `<span class="micro">${a.arm}</span>
+      <div class="fabric">${Array.from({length: total}, () => "<i></i>").join("")}</div>
+      <span class="micro sp-units"></span>`;
+    rowsEl.appendChild(d);
+    return d;
+  });
+  let t = 0;
+  function paint() {
+    const upto = t % (total + 3);   // brief hold at the end, then loop
+    window.DEMO.arms.forEach((a, ri) => {
+      const cells = rows[ri].querySelectorAll(".fabric i");
+      let prev = {};
+      a.episodes.forEach((e, j) => {
+        const c = cells[j];
+        if (j >= upto) { c.style.background = ""; c.style.opacity = ".25"; return; }
+        let best = null, bd = 0;
+        for (const s of Object.keys(e.units)) {
+          const d = (e.units[s]||0) - (prev[s]||0);
+          if (d > bd) { bd = d; best = s; }
+        }
+        prev = e.units;
+        c.style.opacity = j === upto - 1 ? "1" : ".85";
+        c.style.background = best ? `var(${SURF[best]})` : "var(--s-none)";
+      });
+      const last = a.episodes[Math.max(0, Math.min(upto, total) - 1)];
+      rows[ri].querySelector(".sp-units").textContent = upto
+        ? `n${last.units.notes} t${last.units.tools}` : "";
+    });
+    document.getElementById("sp-foot").textContent =
+      `episode ${Math.min(upto, total)}/${total} · ${window.DEMO.meta.harness} · goal: none`;
+    t++;
+  }
+  paint();
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
+    setInterval(paint, 900);
+})();
+</script>
 
 <div class="wrap">
   <div class="grid">
@@ -50,10 +119,173 @@
   </div>
 
   <h2>The evolve loop</h2>
-  <div class="print" style="text-align:center">
-    <img src="assets/proteus-architecture.png" alt="The Proteus evolve loop"
-         style="max-width:100%; border-radius:6px">
+  <div class="loop-wrap">
+    <div class="loop-stage">
+      <svg id="loop-svg" viewBox="0 0 360 360" aria-label="observe, propose, act, reflect cycle">
+        <circle cx="180" cy="180" r="118" fill="none" stroke="var(--rule)" stroke-width="1"/>
+        <g id="loop-arrows"></g>
+        <g id="loop-nodes"></g>
+        <text x="180" y="170" text-anchor="middle" class="loop-ep micro">EPISODE</text>
+        <text x="180" y="196" text-anchor="middle" id="loop-phase" class="loop-cur"></text>
+      </svg>
+      <div class="micro" style="text-align:center; margin-top:6px">
+        context-fresh each episode · only files cross the boundary ·
+        <a href="assets/proteus-architecture.png">print version</a></div>
+    </div>
+    <div class="loop-detail">
+      <div class="micro" id="d-kind"></div>
+      <div class="d-title" id="d-title"></div>
+      <p id="d-body"></p>
+      <div class="micro" id="d-plug"></div>
+    </div>
   </div>
+
+  <div class="mod-rail" id="mods"></div>
+  <div class="micro" style="margin-top:10px">episode boundary: git snapshot · evaluators
+  run · accept/reject — every run keeps its full history as a git repository</div>
+
+<style>
+.loop-wrap { display:grid; grid-template-columns:minmax(280px,380px) 1fr; gap:34px;
+  align-items:center }
+@media (max-width:760px){ .loop-wrap { grid-template-columns:1fr } }
+#loop-svg { width:100%; display:block }
+.loop-ep { fill:var(--dim); font-size:10px; letter-spacing:.2em }
+.loop-cur { fill:var(--anchor-hi); font-size:19px;
+  font-family:"Iowan Old Style",Palatino,Georgia,serif; font-style:italic }
+.loop-node { cursor:pointer }
+.loop-node circle { fill:var(--bg); stroke:var(--soft); stroke-width:1.2;
+  transition:all .25s }
+.loop-node text { fill:var(--soft); font-size:11px; letter-spacing:.14em;
+  font-family:"SF Mono",ui-monospace,monospace; text-transform:uppercase }
+.loop-node.on circle { stroke:var(--anchor-hi); stroke-width:2; fill:var(--panel) }
+.loop-node.on text { fill:var(--ink) }
+.loop-node.lit circle { stroke:var(--anchor-hi); stroke-dasharray:3 3 }
+#loop-arrows path { stroke:var(--dim); fill:none; stroke-width:1;
+  marker-end:url(#arr) }
+.loop-detail { border-top:1px solid var(--ink); padding-top:14px; min-height:150px }
+.d-title { font-size:24px; margin:6px 0 8px;
+  font-family:"Iowan Old Style",Palatino,Georgia,serif }
+.loop-detail p { font-size:14.5px; margin-bottom:10px }
+#d-plug { line-height:2 }
+.mod-rail { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:22px; margin-top:40px }
+.mod { border-top:1px solid var(--rule); padding-top:10px; cursor:pointer;
+  transition:border-color .2s }
+.mod:hover, .mod.on { border-top-color:var(--anchor) }
+.mod .micro { display:block; margin-bottom:6px }
+.mod .m-name { font-size:15.5px;
+  font-family:"Iowan Old Style",Palatino,Georgia,serif }
+</style>
+<script>
+const PHASES = [
+  {k:"observe", body:"Take stock of the harness you woke up in — what is here, what state it is in.",
+   plug:"receives · evaluator scores from the last episode, when visibility = observe"},
+  {k:"propose", body:"List what you could do next to improve your own harness.",
+   plug:"receives · the disposition's phase text, like every phase"},
+  {k:"act", body:"Pick one proposal and carry it out by editing your own harness.",
+   plug:"receives · the goal text, when a goal is configured"},
+  {k:"reflect", body:"Decide what to carry forward. Only files survive to the next episode.",
+   plug:"followed by · git snapshot → evaluators → accept/reject"},
+];
+const MODS = [
+  {n:"Harness adapter", lit:[0,1,2,3],
+   b:"One small class runs the four phases on any harness — minimal, llm, dsh, pi, aki, or yours via --harness module:Class. No harness code modified.",
+   p:"runs · every phase"},
+  {n:"Preference injector", lit:[0,1,2,3],
+   b:"A removable disposition installed at episode 0: review:<surface>, record:<surface>, or custom text — carried as a marked block the harness reads natively.",
+   p:"touches · every phase, removable for the swap test"},
+  {n:"Goal & evaluator", lit:[0,2],
+   b:"No goal, one goal, or many. Evaluators score every episode; the agent sees the score in observe — or never. An outer loop can reject regressions.",
+   p:"goal → act · visible scores → observe"},
+  {n:"Sandbox", lit:[2],
+   b:"Episodes run in prepared, pinned containers (environments/): the harness in the image, the evolving workspace always a mount, network declared per environment.",
+   p:"contains · act, where authored code runs"},
+  {n:"Ruler", lit:[3],
+   b:"Structural distance per surface, behavioural distance with a permutation test, and crystallization: remove the disposition, read back what survived.",
+   p:"reads · every episode boundary, same ruler for every condition"},
+  {n:"Outputs", lit:[3],
+   b:"One git commit per episode — export or push the evolution history. A live tracker shows progress and the identity fabric while the sweep runs.",
+   p:"emits · git history + live fabric"},
+];
+const CX=180, CY=180, R=118;
+const pos = i => { const a = -Math.PI/2 + i*Math.PI/2;
+  return [CX+R*Math.cos(a), CY+R*Math.sin(a)]; };
+const nodesG = document.getElementById("loop-nodes");
+const arrowsG = document.getElementById("loop-arrows");
+const svg = document.getElementById("loop-svg");
+svg.insertAdjacentHTML("afterbegin",
+  `<defs><marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7"
+    markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8" fill="none"
+    stroke="var(--dim)" stroke-width="1.2"/></marker></defs>`);
+PHASES.forEach((p,i) => {
+  const [x,y] = pos(i);
+  const g = document.createElementNS("http://www.w3.org/2000/svg","g");
+  g.setAttribute("class","loop-node"); g.dataset.i = i;
+  const ly = i===0 ? y-24 : i===2 ? y+30 : y+4;
+  const lx = i===1 ? x-22 : i===3 ? x+22 : x;      // side labels sit inside the circle
+  const anch = i===1 ? "end" : i===3 ? "start" : "middle";
+  g.innerHTML = `<circle cx="${x}" cy="${y}" r="13"/>
+    <text x="${lx}" y="${ly}" text-anchor="${anch}">${i+1} ${p.k}</text>`;
+  g.addEventListener("click", () => { manual = true; setPhase(i); });
+  nodesG.appendChild(g);
+  const [x2,y2] = pos((i+1)%4);
+  const a1 = -Math.PI/2 + i*Math.PI/2 + 0.16, a2 = a1 + Math.PI/2 - 0.32;
+  const p1 = [CX+R*Math.cos(a1), CY+R*Math.sin(a1)];
+  const p2 = [CX+R*Math.cos(a2), CY+R*Math.sin(a2)];
+  const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+  path.setAttribute("d",
+    `M${p1[0]},${p1[1]} A${R},${R} 0 0 1 ${p2[0]},${p2[1]}`);
+  arrowsG.appendChild(path);
+});
+let cur = 0, manual = false;
+function setPhase(i, fromMod) {
+  cur = i;
+  [...nodesG.children].forEach((g,j) => {
+    g.classList.toggle("on", j===i);
+    if (!fromMod) g.classList.remove("lit");
+  });
+  const p = PHASES[i];
+  document.getElementById("loop-phase").textContent = p.k;
+  if (!fromMod) {
+    document.getElementById("d-kind").textContent = `phase ${i+1} of 4`;
+    document.getElementById("d-title").textContent = p.k;
+    document.getElementById("d-body").textContent = p.body;
+    document.getElementById("d-plug").textContent = p.plug;
+    [...document.querySelectorAll(".mod")].forEach(m => m.classList.remove("on"));
+  }
+}
+const modsDiv = document.getElementById("mods");
+MODS.forEach((m,mi) => {
+  const d = document.createElement("div");
+  d.className = "mod";
+  d.innerHTML = `<span class="micro">module</span>
+    <span class="m-name">${m.n}</span>`;
+  const show = () => {
+    document.getElementById("d-kind").textContent = "module";
+    document.getElementById("d-title").textContent = m.n;
+    document.getElementById("d-body").textContent = m.b;
+    document.getElementById("d-plug").textContent = m.p;
+    [...document.querySelectorAll(".mod")].forEach(x => x.classList.remove("on"));
+    d.classList.add("on");
+    [...nodesG.children].forEach((g,j) =>
+      g.classList.toggle("lit", m.lit.includes(j)));
+    manual = true;
+  };
+  d.addEventListener("mouseenter", () => {
+    [...nodesG.children].forEach((g,j) =>
+      g.classList.toggle("lit", m.lit.includes(j)));
+  });
+  d.addEventListener("mouseleave", () => {
+    if (!d.classList.contains("on"))
+      [...nodesG.children].forEach(g => g.classList.remove("lit"));
+  });
+  d.addEventListener("click", show);
+  modsDiv.appendChild(d);
+});
+setPhase(0);
+if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
+  setInterval(() => { if (!manual) setPhase((cur+1)%4); }, 2600);
+</script>
 
   <h2>60-second demo · no key · no docker</h2>
   <pre class="cmd">pip install proteus-evolve   # or: git clone github.com/yichen14/Proteus && pip install -e .

@@ -278,6 +278,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(STATIC / "playground.html", "text/html; charset=utf-8")
         if p in ("/run", "/run.html"):
             return self._file(STATIC / "run.html", "text/html; charset=utf-8")
+        if p in ("/demo", "/demo.html"):
+            return self._file(STATIC / "demo.html", "text/html; charset=utf-8")
         if re.fullmatch(r"/assets/[\w.-]+", p):
             ext = p.rsplit(".", 1)[-1]
             ctype = {"png": "image/png", "css": "text/css", "js": "text/javascript"}.get(
