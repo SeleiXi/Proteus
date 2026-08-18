@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proteus run</title>
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<header class="site">
+  <img src="assets/proteus-logo.png" alt="">
+  <span class="name">PROTEUS</span>
+  <nav>
+    <a href="playground.html">Playground</a>
+    <a href="index.html">Home</a>
+  </nav>
+</header>
+
+<div class="wrap">
+  <h2>Run <span id="rid" class="muted"></span></h2>
+  <div id="status" class="banner">loading…</div>
+  <table id="tbl" style="display:none"><thead><tr>
+    <th>arm</th><th>seed</th><th>progress</th><th>episodes</th>
+    <th>units by surface</th><th>growth</th><th>last score</th><th>status</th>
+  </tr></thead><tbody id="rows"></tbody></table>
+  <div class="muted" id="foot" style="margin-top:10px"></div>
+</div>
+
+<script>
+const API = localStorage.getItem("proteus_api")
+  || (location.protocol === "file:" || location.host.endsWith("github.io")
+      ? "http://localhost:8400" : location.origin);
+const id = new URLSearchParams(location.search).get("id");
+document.getElementById("rid").textContent = id ? id.slice(0, 8) : "?";
+
+async function jl(u) {
+  try {
+    const r = await fetch(u, {cache: "no-store"});
+    if (!r.ok) return [];
+    return (await r.text()).split("\n").filter(Boolean).map(JSON.parse);
+  } catch (e) { return []; }
+}
+function spark(recs) {
+  if (!recs.length) return "";
+  const names = Object.keys(recs[recs.length-1].units || {});
+  const W = 140, H = 26, n = recs.length;
+  let max = 1;
+  recs.forEach(r => names.forEach(s => max = Math.max(max, (r.units||{})[s]||0)));
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}">` + names.map((s,i) => {
+    const pts = recs.map((r,j) =>
+      `${(j/Math.max(n-1,1))*W},${H-2-((r.units||{})[s]||0)/max*(H-6)}`);
+    return `<polyline fill="none" stroke="var(--accent)" stroke-opacity="${1-i*0.3}"
+      stroke-width="1.5" ${i%2?'stroke-dasharray="3,2"':''} points="${pts.join(" ")}"/>`;
+  }).join("") + "</svg>";
+}
+
+async function tick() {
+  const st = document.getElementById("status");
+  let job;
+  try {
+    job = await (await fetch(`${API}/api/runs/${id}`, {cache:"no-store"})).json();
+  } catch (e) { st.className = "banner bad";
+    st.textContent = `cannot reach backend at ${API}`; return; }
+  if (job.error && job.status === "error") {
+    st.className = "banner bad";
+    st.textContent = `error: ${job.error}`;
+  } else if (job.status === "queued") {
+    st.textContent = `queued — position ${job.queue_position} (bounded concurrency; the page keeps polling)`;
+  } else if (job.status === "running") {
+    st.textContent = "running — live view below updates every 5s";
+  } else if (job.status === "done") {
+    st.className = "banner";
+    st.textContent = "complete";
+  }
+
+  let manifest;
+  try {
+    const r = await fetch(`${API}/api/runs/${id}/manifest.json`, {cache:"no-store"});
+    if (!r.ok) return;
+    manifest = await r.json();
+  } catch (e) { return; }
+  document.getElementById("tbl").style.display = "";
+  const rows = [];
+  for (const r of manifest.runs) {
+    const recs = await jl(`${API}/api/runs/${id}/progress/${r.id}.jsonl`);
+    const last = recs[recs.length-1];
+    const ep = last ? last.episode : 0, tgt = manifest.episodes;
+    const errored = last && !last.ok;
+    const units = last ? Object.entries(last.units).map(([k,v]) => `${k}:${v}`).join("  ") : "—";
+    const score = last && Object.keys(last.scores||{}).length
+      ? Object.entries(last.scores).map(([k,v]) => `${k}=${(+v).toFixed(2)}`).join(" ") : "—";
+    const status = errored ? `<span class="tag bad">error</span>`
+      : ep >= tgt ? `<span class="tag done">complete</span>`
+      : ep > 0 ? `<span class="tag">running</span>` : `<span class="tag">pending</span>`;
+    rows.push(`<tr><td>${r.arm}</td><td>${r.seed}</td>
+      <td><div class="bar ${errored?"err":""}"><i style="width:${Math.round(100*ep/tgt)}%"></i></div></td>
+      <td>${ep}/${tgt}</td><td>${units}</td><td>${spark(recs)}</td>
+      <td>${score}</td><td>${status}</td></tr>`);
+  }
+  document.getElementById("rows").innerHTML = rows.join("");
+  document.getElementById("foot").textContent =
+    `refreshed ${new Date().toLocaleTimeString()}`;
+  if (job.status === "done" || job.status === "error") clearInterval(timer);
+}
+const timer = setInterval(tick, 5000);
+tick();
+</script>
+</body>
+</html>

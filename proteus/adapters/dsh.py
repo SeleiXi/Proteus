@@ -75,10 +75,12 @@ class DshHarness:
                 is_code=True),
     )
 
-    def __init__(self, image: str = IMAGE, network: str = "host") -> None:
+    def __init__(self, image: str = IMAGE, network: str = "host",
+                 key: str | None = None) -> None:
         self.image = image
         self.network = network
-        self.key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY", "")
+        # per-instance key injection first (multi-tenant runs must not share env)
+        self.key = key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY", "")
         from proteus.sandbox import DockerSandbox, SandboxConfig
         self.sandbox = DockerSandbox(SandboxConfig(
             network=network, image=image,

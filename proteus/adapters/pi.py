@@ -59,12 +59,14 @@ class PiHarness:
     )
 
     def __init__(self, image: str = IMAGE, network: str = "host",
-                 provider: str = "deepseek", model: str = "deepseek-v4-flash") -> None:
+                 provider: str = "deepseek", model: str = "deepseek-v4-flash",
+                 key: str | None = None) -> None:
         self.image = image
         self.network = network
         self.provider = provider
         self.model = model
-        self.key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY", "")
+        # per-instance key injection first (multi-tenant runs must not share env)
+        self.key = key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY", "")
         from proteus.sandbox import DockerSandbox, SandboxConfig
         self.sandbox = DockerSandbox(SandboxConfig(
             network=network, image=image, env_passthrough=("DEEPSEEK_API_KEY",),

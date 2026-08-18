@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proteus — self-evolution for any agent harness</title>
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<header class="site">
+  <img src="assets/proteus-logo.png" alt="">
+  <span class="name">PROTEUS</span>
+  <nav>
+    <a href="playground.html">Playground</a>
+    <a href="https://github.com/yichen14/Proteus">GitHub</a>
+    <a href="https://github.com/yichen14/Proteus/blob/main/docs/RECIPES.md">Recipes</a>
+  </nav>
+</header>
+
+<div class="hero">
+  <img class="logo" src="assets/proteus-logo.png" alt="Proteus">
+  <h1>Self-evolution for any agent harness.</h1>
+  <div class="slog">Plug in. Evolve. Measure.</div>
+  <div class="cta">
+    <a class="btn primary" href="playground.html">Launch Playground</a>
+    <a class="btn" href="https://github.com/yichen14/Proteus">Star on GitHub</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="grid">
+    <div class="card">
+      <h3>Any harness</h3>
+      Plug in DeepSeek Harness, Pi, our reference harnesses, or your own — one small
+      adapter, no harness code modified. The framework, sandbox, and measurement work
+      unchanged.
+    </div>
+    <div class="card">
+      <h3>Goal or no goal</h3>
+      Run evolution under one goal, many goals, or none at all — with evaluators the agent
+      sees, or never sees. No-goal, unpressured evolution is a first-class mode.
+    </div>
+    <div class="card">
+      <h3>Measured, not just scored</h3>
+      Structural distance per surface, behavioural distance with a permutation test, and a
+      crystallization test: remove the injected preference and read back what the harness
+      built on its own.
+    </div>
+  </div>
+
+  <h2>The evolve loop</h2>
+  <div class="card" style="text-align:center">
+    <img src="assets/proteus-architecture.png" alt="The Proteus evolve loop"
+         style="max-width:100%; border-radius:6px">
+  </div>
+
+  <h2>60-second local demo (no key, no Docker)</h2>
+  <pre class="cmd">pip install proteus-evolve   # or: git clone github.com/yichen14/Proteus && pip install -e .
+proteus run --harness minimal --arm neutral --arm review:notes --arm review:tools \
+    --seeds 4 --episodes 8 --out runs/demo
+proteus measure --harness minimal --out runs/demo</pre>
+</div>
+
+<footer class="site">Proteus — MIT — <a href="https://github.com/yichen14/Proteus">github.com/yichen14/Proteus</a></footer>
+</body>
+</html>
