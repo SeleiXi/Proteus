@@ -23,7 +23,8 @@ body.trace-front #stage { opacity:1; pointer-events:auto }
 #traj .axis { stroke:var(--rule) }
 #traj .tline { stroke:var(--soft); fill:none; stroke-width:1.2 }
 #traj circle { cursor:pointer }
-#traj circle.cur { animation:pulse 1.6s infinite }
+#traj circle.cur { animation:breathe 1.5s ease-in-out infinite }
+@keyframes breathe { 0%,100%{opacity:1} 50%{opacity:.18} }
 #stage-cap { display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap }
 #tick-line { min-height:20px; color:var(--anchor-hi) }
 .hero-sec { z-index:2; text-align:center; pointer-events:none }
@@ -55,8 +56,10 @@ section.page > .wrap { width:100% }
 
 <div id="stage">
   <div class="micro" style="margin-bottom:14px"><span class="sp-dot"></span>
-    a real run, replaying · one episode every 30s</div>
-  <svg id="traj" viewBox="0 0 1000 520" aria-label="evolution trajectory"></svg>
+    a real run, replaying · one episode every 30s · y = tool calls per episode ·
+    click empty space to zoom out</div>
+  <svg id="traj" viewBox="0 0 1000 520" aria-label="evolution trajectory">
+    <g id="tj-overlay"></g><g id="tj-world"></g></svg>
   <div id="stage-cap">
     <span class="micro" id="tick-line"></span>
     <span class="micro" id="case-foot"></span>
@@ -343,7 +346,8 @@ proteus measure --harness minimal --out runs/demo</pre>
 #traj .axis { stroke:var(--rule) }
 #traj .tline { stroke:var(--soft); fill:none; stroke-width:1 }
 #traj circle { cursor:pointer }
-#traj circle.cur { animation:pulse 1.6s infinite }
+#traj circle.cur { animation:breathe 1.5s ease-in-out infinite }
+@keyframes breathe { 0%,100%{opacity:1} 50%{opacity:.18} }
 #tick-line { min-height:17px; color:var(--anchor-hi) }
 .sp-foot { margin-top:8px; color:var(--dim) }
 
@@ -407,75 +411,157 @@ proteus measure --harness minimal --out runs/demo</pre>
   const C = window.CASE, EPS = C.episodes, N = EPS.length;
   const SURF = {memory:"var(--s-memory)", skills:"var(--s-skills)", tools:"var(--s-tools)"};
   const WRITE = /write|edit|update|append/;
-  const svg = document.getElementById("traj");
-  const W = 1000, H = 520, PAD = 60;
-  const maxU = Math.max(...EPS.map(e => e.units.memory + e.units.skills + e.units.tools));
-  const xy = i => [PAD + i*(W-2*PAD)/(N-1),
-    H-18 - (EPS[i].units.memory+EPS[i].units.skills+EPS[i].units.tools)/maxU*(H-42)];
-  const dom = i => {
-    const e = EPS[i], p = i ? EPS[i-1].units : {memory:0,skills:0,tools:0};
-    let best = "memory", bd = -1;
-    for (const s of Object.keys(e.units)) {
-      const d = e.units[s]-p[s]; if (d > bd) { bd = d; best = s; }
-    }
-    return bd > 0 ? SURF[best] : "var(--s-none)";
-  };
-  svg.innerHTML = `<line class="axis" x1="${PAD}" y1="${H-18}" x2="${W-PAD}" y2="${H-18}"/>
-    <text x="${PAD}" y="${H-4}" class="micro" fill="var(--dim)" font-size="12">ep 1</text>
-    <text x="${W-PAD}" y="${H-4}" text-anchor="end" class="micro" fill="var(--dim)"
-      font-size="12">ep ${N}</text>
-    <polyline class="tline" id="tj-line" points=""/>
+  const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---- world geometry: x = episode, y = tool calls (fixed scale)
+  const SP = 160, PADX = 90, VH = 520, TOP = 70, BOT = VH - 70;
+  const tcMax = Math.max(...EPS.map(e => e.steps.length));
+  const Y_MAX = Math.ceil(tcMax / 25) * 25;
+  const px = i => PADX + i * SP;
+  const py = i => BOT - (EPS[i].steps.length / Y_MAX) * (BOT - TOP);
+  const WORLD_W = PADX * 2 + (N - 1) * SP;
+
+  const world = document.getElementById("tj-world");
+  const overlay = document.getElementById("tj-overlay");
+  world.innerHTML = `<polyline id="tj-line" fill="none" stroke="var(--soft)"
+      stroke-width="1.4" points=""/>
+    <line id="tj-grow" stroke="var(--anchor-hi)" stroke-width="1.6"
+      x1="0" y1="0" x2="0" y2="0" opacity="0"/>
     <g id="tj-dots"></g>`;
   const dots = document.getElementById("tj-dots");
-  EPS.forEach((e,i) => {
-    const [x,y] = xy(i);
-    const c = document.createElementNS("http://www.w3.org/2000/svg","circle");
-    c.setAttribute("cx",x); c.setAttribute("cy",y); c.setAttribute("r",7);
+  const dom = i => {
+    const e = EPS[i], p0 = i ? EPS[i-1].units : {memory:0,skills:0,tools:0};
+    let best = null, bd = 0;
+    for (const s of Object.keys(e.units)) {
+      const d = e.units[s] - (p0[s]||0); if (d > bd) { bd = d; best = s; }
+    }
+    return best ? SURF[best] : "var(--s-none)";
+  };
+  EPS.forEach((e, i) => {
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    c.setAttribute("cx", px(i)); c.setAttribute("cy", py(i)); c.setAttribute("r", 6);
     c.setAttribute("fill", dom(i)); c.dataset.i = i; c.style.display = "none";
-    c.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation();
+    c.addEventListener("click", ev => { ev.stopPropagation();
       openDome(i, ev.currentTarget); });
     dots.appendChild(c);
   });
 
-  // ---- ambient clock: one episode per 30s, ticker steps through real steps
-  let cur = 0, stepIdx = 0, stepTimer = null;
-  const EP_MS = 30000;
-  function reveal(n) {
-    [...dots.children].forEach((c,i) => {
-      c.style.display = i <= n ? "" : "none";
-      c.classList.toggle("cur", i === n);
-    });
-    document.getElementById("tj-line").setAttribute("points",
-      EPS.slice(0, n+1).map((_,i) => xy(i).join(",")).join(" "));
-    const u = EPS[n].units;
-    document.getElementById("case-foot").textContent =
-      `${C.meta.kind} · ep ${EPS[n].ep}/${N} · memory ${u.memory} · skills ${u.skills}` +
-      ` · tools ${u.tools} · ${C.meta.arm}`;
+  // ---- 2D camera on the world group
+  const S_FOLLOW = 1000 / (SP * 2.6);            // ~2.4x: two-three dots in frame
+  const S_OVER = Math.min(1000 / WORLD_W, 1) * 0.96;
+  let mode = "follow";
+  let cam = {x: px(0), y: py(0), s: S_FOLLOW};
+  let tgt = {x: px(0), y: py(0), s: S_FOLLOW};
+  function styleForMode() {
+    const over = mode === "over";
+    [...dots.children].forEach(c => c.setAttribute("r", over ? 16 : 6));
+    document.getElementById("tj-line").setAttribute("stroke-width", over ? 4 : 1.4);
+    document.getElementById("tj-grow").setAttribute("stroke-width", over ? 4.5 : 1.6);
   }
+  function applyCam() {
+    world.setAttribute("transform",
+      `translate(${500 - cam.s * cam.x} ${260 - cam.s * cam.y}) scale(${cam.s})`);
+    // y gridlines live in screen space, mapped through the camera
+    const rows = [0, Y_MAX/2, Y_MAX].map(v => {
+      const wy = BOT - (v / Y_MAX) * (BOT - TOP);
+      return {v, sy: 260 + cam.s * (wy - cam.y)};
+    }).filter(r => r.sy > 26 && r.sy < VH - 8);
+    overlay.innerHTML = rows.map(r =>
+      `<line x1="0" x2="1000" y1="${r.sy}" y2="${r.sy}" stroke="var(--rule)"
+         stroke-dasharray="2 5"/>
+       <text x="8" y="${r.sy - 5}" fill="var(--dim)" font-size="11"
+         font-family="SF Mono,ui-monospace,monospace">${r.v}</text>`).join("")
+      + `<text x="992" y="${VH-10}" text-anchor="end" fill="var(--dim)" font-size="11"
+         font-family="SF Mono,ui-monospace,monospace">tool calls / episode</text>`;
+  }
+
+  // ---- ambient life: dwell on a breathing dot, then launch a line to the next
+  const EP_MS = 30000, LINE_MS = 3800;
+  let cur = 0, stepIdx = 0, flight = null;   // flight = {t0}
+  const grow = document.getElementById("tj-grow");
+  const lineEl = document.getElementById("tj-line");
+  function syncLine(upto) {
+    lineEl.setAttribute("points",
+      EPS.slice(0, upto + 1).map((_, k) => `${px(k)},${py(k)}`).join(" "));
+  }
+  function setCur(i) {
+    cur = i;
+    [...dots.children].forEach((c, k) => {
+      c.style.display = k <= i ? "" : "none";
+      c.classList.toggle("cur", k === i);
+    });
+    syncLine(i);
+    const u = EPS[i].units;
+    document.getElementById("case-foot").textContent =
+      `${C.meta.kind} · ep ${EPS[i].ep}/${N} · ${EPS[i].steps.length} tool calls · ` +
+      `memory ${u.memory} · skills ${u.skills} · tools ${u.tools}`;
+    stepIdx = 0;
+    if (mode === "follow") { tgt.x = px(i); tgt.y = py(i); }
+  }
+  function launch() {
+    if (flight) return;
+    if (cur >= N - 1) {          // loop the replay
+      setCur(0); return;
+    }
+    flight = {t0: performance.now()};
+    grow.setAttribute("x1", px(cur)); grow.setAttribute("y1", py(cur));
+    grow.setAttribute("opacity", 1);
+    document.getElementById("tick-line").textContent =
+      `live · episode ${EPS[cur+1].ep} begins…`;
+  }
+  const ease = k => k < .5 ? 2*k*k : 1 - Math.pow(-2*k + 2, 2) / 2;
+
+  // ---- ticker: the current episode's real steps paced across the dwell
   function tickStep() {
+    if (flight) return;
     const steps = EPS[cur].steps;
     if (!steps.length) return;
-    const [ph, tool, tgt] = steps[stepIdx % steps.length];
+    const [ph, tool, tg] = steps[stepIdx % steps.length];
     document.getElementById("tick-line").textContent =
-      `live · ${ph} · ${tool}${tgt ? " → " + tgt : ""}`;
+      `live · ${ph} · ${tool}${tg ? " → " + tg : ""}`;
     stepIdx++;
   }
-  function startEpisode(i) {
-    cur = i; stepIdx = 0; reveal(i);
-    clearInterval(stepTimer);
-    const steps = Math.max(EPS[i].steps.length, 1);
-    stepTimer = setInterval(tickStep, Math.max(EP_MS/steps, 350));
-    tickStep();
-  }
-  startEpisode(0);
-  if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
-    setInterval(() => startEpisode((cur+1) % N), EP_MS);
+  setInterval(tickStep, Math.max((EP_MS - LINE_MS) / 90, 300));
+  if (!reduced()) setInterval(launch, EP_MS);
 
-  // ---- the dome
+  // ---- main loop
+  function frame(now) {
+    if (flight) {
+      const k = Math.min((now - flight.t0) / LINE_MS, 1);
+      const e = ease(k);
+      const tx = px(cur) + (px(cur+1) - px(cur)) * e;
+      const ty = py(cur) + (py(cur+1) - py(cur)) * e;
+      grow.setAttribute("x2", tx); grow.setAttribute("y2", ty);
+      if (mode === "follow") { tgt.x = tx; tgt.y = ty; }
+      if (k >= 1) {
+        flight = null; grow.setAttribute("opacity", 0);
+        setCur(cur + 1);
+      }
+    }
+    const a = reduced() ? 1 : 0.055;
+    cam.x += (tgt.x - cam.x) * a;
+    cam.y += (tgt.y - cam.y) * a;
+    cam.s += (tgt.s - cam.s) * a;
+    applyCam();
+    requestAnimationFrame(frame);
+  }
+
+  // ---- interactions: dots open the dome; empty space toggles overview
+  document.getElementById("traj").addEventListener("click", () => {
+    if (mode === "follow") {
+      mode = "over";
+      tgt = {x: (PADX + WORLD_W - PADX) / 2, y: (TOP + BOT) / 2 + 30, s: S_OVER};
+    } else {
+      mode = "follow";
+      tgt = {x: px(cur), y: py(cur), s: S_FOLLOW};
+    }
+    styleForMode();
+  });
+
+  // ---- the dome (episode detail) --------------------------------------------
   const ov = document.getElementById("dome-overlay");
   let domeEp = 0, feedTimer = null;
   const EASE_MS = 620;
-  const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
   function ghostRect(el) {
     const r = el.getBoundingClientRect();
     return {left: r.left, top: r.top, w: r.width, h: r.height};
@@ -495,7 +581,6 @@ proteus measure --harness minimal --out runs/demo</pre>
     setTimeout(() => g.remove(), EASE_MS + 500);
   }
   function discCircle() {
-    // the disc is the right half of a circle whose centre sits on the left edge
     const d = document.getElementById("dome").getBoundingClientRect();
     const R = d.height / 2;
     return {left: d.left - R, top: d.top, w: 2*R, h: 2*R};
@@ -538,9 +623,8 @@ proteus measure --harness minimal --out runs/demo</pre>
       +${e.d.a} added · ${e.d.r} revised · ${e.d.d} dropped
       <span class="micro">tool calls</span>${e.steps.length}
       <span class="micro">top tools</span>` +
-      top.map(([t,n]) => `<div>${t} · ${n}
+      top.map(([tl,n]) => `<div>${tl} · ${n}
         <div class="meas-bar" style="width:${Math.round(100*n/mx)}%"></div></div>`).join("");
-    // replay the feed
     const feed = document.getElementById("dome-feed");
     feed.innerHTML = "";
     clearInterval(feedTimer);
@@ -548,14 +632,13 @@ proteus measure --harness minimal --out runs/demo</pre>
     const ms = Math.max(120, Math.min(400, 12000 / e.steps.length));
     feedTimer = setInterval(() => {
       if (j >= e.steps.length) { clearInterval(feedTimer); return; }
-      const [ph, tool, tgt] = e.steps[j++];
+      const [ph, tool, tg] = e.steps[j++];
       document.getElementById("dome-phase").textContent = ph.toUpperCase();
       const d = document.createElement("div");
       d.className = "st" + (WRITE.test(tool) ? " w" : "");
       d.innerHTML = `<span class="ph">${ph}</span>
-        <span class="tl">${tool}</span><span class="tg">${tgt || ""}</span>`;
+        <span class="tl">${tool}</span><span class="tg">${tg || ""}</span>`;
       feed.appendChild(d);
-      feed.scrollTop = feed.scrollHeight;
       while (feed.children.length > 14) feed.removeChild(feed.firstChild);
     }, ms);
   }
@@ -566,6 +649,15 @@ proteus measure --harness minimal --out runs/demo</pre>
     if (domeEp < N-1) { domeEp++; renderDome(); } };
   document.addEventListener("keydown", e => { if (e.key === "Escape") closeDome(); });
 
+  // ---- go
+  setCur(0); styleForMode(); applyCam(); tickStep();
+  requestAnimationFrame(frame);
+  if (reduced()) { mode = "over";
+    tgt = {x: WORLD_W/2, y: (TOP+BOT)/2, s: S_OVER};
+    cam = {...tgt}; styleForMode(); applyCam();
+    [...dots.children].forEach(c => c.style.display = "");
+    syncLine(N-1);
+  }
 })();
 </script>
 <script>
