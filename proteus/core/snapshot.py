@@ -49,7 +49,6 @@ def commit(work_tree: Path, message: str) -> str:
 
 
 def head(work_tree: Path) -> str:
-    git_dir = work_tree.parent / ".snapshot.git"
     try:
         return _git(work_tree, "rev-parse", "HEAD").strip()
     except subprocess.CalledProcessError:
@@ -92,4 +91,9 @@ def materialize(work_tree: Path, sha: str, dest: Path) -> None:
         ["git", "--git-dir", str(git_dir), "archive", sha],
         capture_output=True, check=True,
     )
-    subprocess.run(["tar", "-x", "-C", str(dest)], input=archive.stdout, check=True)
+    subprocess.run(
+        ["tar", "-x", "-C", str(dest)],
+        input=archive.stdout,
+        capture_output=True,
+        check=True,
+    )

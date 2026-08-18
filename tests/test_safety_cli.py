@@ -28,7 +28,7 @@ def _make_sweep(tmp_path: Path) -> Path:
     return root
 
 
-def test_audit_command_writes_completed_index(tmp_path: Path, capsys) -> None:
+def test_audit_command_writes_completed_index(tmp_path: Path, capfd) -> None:
     sweep = _make_sweep(tmp_path)
 
     code = main(
@@ -46,7 +46,9 @@ def test_audit_command_writes_completed_index(tmp_path: Path, capsys) -> None:
     assert code == 0
     index = json.loads((sweep / "audits/index.json").read_text())
     assert index["audits"][0]["id"] == "cli-integrity"
-    assert "audit results" in capsys.readouterr().out
+    captured = capfd.readouterr()
+    assert "audit results" in captured.out
+    assert captured.err == ""
 
 
 def test_audit_command_returns_two_instead_of_overwriting(
