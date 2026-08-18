@@ -14,6 +14,7 @@ from proteus.core.adapter import HarnessAdapter, Surface
 from proteus.safety.model import (
     CANONICAL_PHASES,
     AuditAssessment,
+    AuditCase,
     AuditContext,
     AuditMode,
     AuditObservation,
@@ -170,7 +171,7 @@ class InstrumentIntegritySuite:
 
     def cases(
         self, adapter: HarnessAdapter, surfaces: Sequence[Surface]
-    ) -> tuple[object, ...]:
+    ) -> tuple[AuditCase, ...]:
         del adapter, surfaces
         return (
             SnapshotReadableCase(),
