@@ -141,6 +141,7 @@ footer.site a { color:var(--dim) }
 .mark { color: var(--ink); display: block }
 header.site .mark { height: 26px; width: auto }
 .hero .mark, .hero-sec .mark { height: 116px; width: auto; margin: 0 auto }
+.hero-sec .mark.lockup, .hero .mark.lockup { height: 150px }
 
 /* theme toggle */
 #theme-btn { background: none; border: 1px solid var(--rule); color: var(--soft);

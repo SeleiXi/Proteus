@@ -23,8 +23,19 @@ body.trace-front #stage { opacity:1; pointer-events:auto }
 #traj .axis { stroke:var(--rule) }
 #traj .tline { stroke:var(--soft); fill:none; stroke-width:1.2 }
 #traj circle { cursor:pointer }
-#traj circle.cur { animation:breathe 1.5s ease-in-out infinite }
-@keyframes breathe { 0%,100%{opacity:1} 50%{opacity:.18} }
+#traj circle.cur { animation:breathe 3.4s cubic-bezier(.4,0,.6,1) infinite;
+  transform-box:fill-box; transform-origin:50% 50%; will-change:transform,opacity }
+@keyframes breathe {
+  0%,100% { transform:scale(.8);  opacity:.5 }
+  50%     { transform:scale(1.9); opacity:1 }
+}
+#traj circle.halo { fill:none; stroke:var(--anchor-hi); stroke-width:2;
+  transform-box:fill-box; transform-origin:50% 50%; pointer-events:none;
+  animation:halo 3.4s cubic-bezier(.4,0,.6,1) infinite }
+@keyframes halo {
+  0%,100% { transform:scale(1);   opacity:.5 }
+  50%     { transform:scale(3.2); opacity:0 }
+}
 #stage-cap { display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap }
 #tick-line { min-height:20px; color:var(--anchor-hi) }
 .hero-sec { z-index:2; text-align:center; pointer-events:none }
@@ -35,7 +46,8 @@ body.trace-front #stage { opacity:1; pointer-events:auto }
 @keyframes bob { 0%,100%{transform:translate(-50%,0)} 50%{transform:translate(-50%,8px)} }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
 @media (prefers-reduced-motion: reduce) {
-  .hero-sec .down, #traj circle.cur, .sp-dot { animation:none } }
+  .hero-sec .down, #traj circle.cur, #traj circle.halo, .sp-dot { animation:none }
+  #traj circle.halo { display:none } }
 .trace-hint { position:absolute; top:9vh; left:5vw; z-index:2; pointer-events:none;
   opacity:0; transition:opacity .8s }
 body.trace-front .trace-hint { opacity:1 }
@@ -84,7 +96,7 @@ section.page > .wrap { width:100% }
 
 <section class="snap hero-sec">
   <div class="kicker micro">an open instrument · est. 2026 · MIT</div>
-  <img class="mark" src="assets/proteus-mark.svg" alt="Proteus">
+  <img class="mark lockup" src="assets/proteus-logo.svg" alt="Proteus">
   <h1 style="font-size:clamp(30px,4.6vw,52px);font-weight:400;line-height:1.12;
     margin:26px auto 12px;max-width:20ch;text-wrap:balance">
     Self-evolution for <em style="font-style:italic;color:var(--anchor-hi)">any</em>
@@ -361,8 +373,19 @@ proteus measure --harness minimal --out runs/demo</pre>
 #traj .axis { stroke:var(--rule) }
 #traj .tline { stroke:var(--soft); fill:none; stroke-width:1 }
 #traj circle { cursor:pointer }
-#traj circle.cur { animation:breathe 1.5s ease-in-out infinite }
-@keyframes breathe { 0%,100%{opacity:1} 50%{opacity:.18} }
+#traj circle.cur { animation:breathe 3.4s cubic-bezier(.4,0,.6,1) infinite;
+  transform-box:fill-box; transform-origin:50% 50%; will-change:transform,opacity }
+@keyframes breathe {
+  0%,100% { transform:scale(.8);  opacity:.5 }
+  50%     { transform:scale(1.9); opacity:1 }
+}
+#traj circle.halo { fill:none; stroke:var(--anchor-hi); stroke-width:2;
+  transform-box:fill-box; transform-origin:50% 50%; pointer-events:none;
+  animation:halo 3.4s cubic-bezier(.4,0,.6,1) infinite }
+@keyframes halo {
+  0%,100% { transform:scale(1);   opacity:.5 }
+  50%     { transform:scale(3.2); opacity:0 }
+}
 #tick-line { min-height:17px; color:var(--anchor-hi) }
 .sp-foot { margin-top:8px; color:var(--dim) }
 #transport { display:flex; align-items:center; gap:12px; margin-top:14px }
@@ -454,6 +477,7 @@ proteus measure --harness minimal --out runs/demo</pre>
       stroke-width="1.4" points=""/>
     <line id="tj-grow" stroke="var(--anchor-hi)" stroke-width="1.6"
       x1="0" y1="0" x2="0" y2="0" opacity="0"/>
+    <circle id="tj-halo" class="halo" r="7" cx="-999" cy="-999"/>
     <g id="tj-dots"></g>`;
   const dots = document.getElementById("tj-dots");
   const dom = i => {
@@ -521,6 +545,8 @@ proteus measure --harness minimal --out runs/demo</pre>
       c.classList.toggle("cur", k === i);
     });
     syncLine(i);
+    const halo = document.getElementById("tj-halo");
+    if (halo) { halo.setAttribute("cx", px(i)); halo.setAttribute("cy", py(i)); }
     const u = EPS[i].units;
     document.getElementById("case-foot").textContent =
       `${C.meta.kind} · ep ${EPS[i].ep}/${N} · ${EPS[i].steps.length} tool calls · ` +
