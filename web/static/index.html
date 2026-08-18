@@ -45,13 +45,19 @@ section.page { height:100vh; scroll-snap-align:start; overflow-y:auto;
   border-top:1px solid var(--rule); position:relative; z-index:2 }
 section.page > .wrap { width:100% }
 .sp-dot { width:7px; height:7px; border-radius:50%; background:var(--anchor-hi);
-  display:inline-block; margin-right:8px; animation:pulse 1.6s ease-in-out infinite }
+  display:inline-block; margin-right:8px;
+  animation:breathe-dot 3.4s cubic-bezier(.4,0,.6,1) infinite }
+@keyframes breathe-dot {
+  0%,100% { transform:scale(.62); opacity:.5;  box-shadow:0 0 0 0 var(--anchor-hi) }
+  50%     { transform:scale(1.15); opacity:1;  box-shadow:0 0 9px 1px var(--anchor-hi) }
+}
 </style>
 </head>
 <body>
 <nav id="corner-nav">
   <a href="playground.html">Playground</a>
   <a href="https://github.com/yichen14/Proteus">GitHub</a>
+  <button id="theme-btn" type="button" aria-label="switch theme"></button>
 </nav>
 
 <div id="stage">
@@ -78,8 +84,7 @@ section.page > .wrap { width:100% }
 
 <section class="snap hero-sec">
   <div class="kicker micro">an open instrument · est. 2026 · MIT</div>
-  <img class="logo" src="assets/proteus-logo.png" alt="Proteus"
-    style="width:120px;background:#fff;padding:12px;border:1px solid var(--rule)">
+  <img class="mark" src="assets/proteus-mark.svg" alt="Proteus">
   <h1 style="font-size:clamp(30px,4.6vw,52px);font-weight:400;line-height:1.12;
     margin:26px auto 12px;max-width:20ch;text-wrap:balance">
     Self-evolution for <em style="font-style:italic;color:var(--anchor-hi)">any</em>
@@ -734,5 +739,6 @@ new IntersectionObserver(es => {
     e.isIntersecting && e.intersectionRatio > .45));
 }, {threshold:[.45]}).observe(traceSec);
 </script>
+<script src="assets/theme.js"></script>
 </body>
 </html>

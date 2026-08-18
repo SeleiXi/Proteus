@@ -8,11 +8,12 @@
 </head>
 <body>
 <header class="site">
-  <img src="assets/proteus-logo.png" alt="">
+  <img class="mark" src="assets/proteus-mark.svg" alt="">
   <span class="name">PROTEUS</span>
   <nav>
     <a href="playground.html">Playground</a>
     <a href="index.html">Home</a>
+    <button id="theme-btn" type="button" aria-label="switch theme"></button>
   </nav>
 </header>
 
@@ -128,5 +129,6 @@ async function tick() {
 const timer = setInterval(tick, 5000);
 tick();
 </script>
+<script src="assets/theme.js"></script>
 </body>
 </html>

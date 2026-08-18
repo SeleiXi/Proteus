@@ -282,7 +282,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(STATIC / "demo.html", "text/html; charset=utf-8")
         if re.fullmatch(r"/assets/[\w.-]+", p):
             ext = p.rsplit(".", 1)[-1]
-            ctype = {"png": "image/png", "css": "text/css", "js": "text/javascript"}.get(
+            ctype = {"png": "image/png", "svg": "image/svg+xml", "css": "text/css",
+                     "js": "text/javascript", "json": "application/json"}.get(
                 ext, "application/octet-stream")
             return self._file(STATIC / "assets" / p.split("/")[-1], ctype)
         if p == "/api/config":
