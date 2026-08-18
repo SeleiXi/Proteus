@@ -338,8 +338,23 @@ proteus measure --harness minimal --out runs/demo</pre>
 .sp-foot { margin-top:8px; color:var(--dim) }
 
 #dome-overlay { position:fixed; inset:0; background:var(--bg); z-index:50;
-  display:none; flex-direction:column; padding:18px 22px; overflow-y:auto }
-#dome-overlay.on { display:flex }
+  display:flex; flex-direction:column; padding:18px 22px; overflow-y:auto;
+  visibility:hidden; opacity:0;
+  transition:opacity .45s cubic-bezier(.32,.72,0,1), visibility 0s .45s }
+#dome-overlay.on { visibility:visible; opacity:1; transition:opacity .45s
+  cubic-bezier(.32,.72,0,1) }
+#dome-overlay .dome-top, #dome-overlay .dome-grid { opacity:0;
+  transform:translateY(12px);
+  transition:opacity .5s cubic-bezier(.32,.72,0,1), transform .5s
+  cubic-bezier(.32,.72,0,1) }
+#dome-overlay.in .dome-top, #dome-overlay.in .dome-grid { opacity:1;
+  transform:none }
+#zoom-ghost { position:fixed; border-radius:50%; border:1px solid var(--soft);
+  background:var(--panel); z-index:60; pointer-events:none;
+  transition:all .62s cubic-bezier(.32,.72,0,1) }
+@media (prefers-reduced-motion: reduce) {
+  #dome-overlay, #dome-overlay .dome-top, #dome-overlay .dome-grid,
+  #zoom-ghost { transition:none } }
 .dome-top { display:flex; justify-content:space-between; align-items:center;
   margin-bottom:8px }
 .dome-nav a { margin-left:18px; font:12px "SF Mono",ui-monospace,monospace;
@@ -401,7 +416,7 @@ proteus measure --harness minimal --out runs/demo</pre>
     c.setAttribute("cx",x); c.setAttribute("cy",y); c.setAttribute("r",7);
     c.setAttribute("fill", dom(i)); c.dataset.i = i; c.style.display = "none";
     c.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation();
-      openDome(i); });
+      openDome(i, ev.currentTarget); });
     dots.appendChild(c);
   });
 
@@ -442,10 +457,47 @@ proteus measure --harness minimal --out runs/demo</pre>
   // ---- the dome
   const ov = document.getElementById("dome-overlay");
   let domeEp = 0, feedTimer = null;
-  function openDome(i) {
-    domeEp = i; ov.classList.add("on"); renderDome();
+  const EASE_MS = 620;
+  const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function ghostRect(el) {
+    const r = el.getBoundingClientRect();
+    return {left: r.left, top: r.top, w: r.width, h: r.height};
   }
-  function closeDome() { ov.classList.remove("on"); clearInterval(feedTimer); }
+  function flyGhost(from, to, then) {
+    const g = document.createElement("div");
+    g.id = "zoom-ghost";
+    Object.assign(g.style, {left: from.left+"px", top: from.top+"px",
+      width: from.w+"px", height: from.h+"px", opacity: 1});
+    document.body.appendChild(g);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      Object.assign(g.style, {left: to.left+"px", top: to.top+"px",
+        width: to.w+"px", height: to.h+"px"});
+    }));
+    setTimeout(() => { g.style.opacity = 0; then && then(); }, EASE_MS);
+    setTimeout(() => g.remove(), EASE_MS + 500);
+  }
+  function openDome(i, dotEl) {
+    domeEp = i; renderDome();
+    ov.classList.add("on");
+    if (reduced() || !dotEl) { ov.classList.add("in"); return; }
+    // the dome is the top half of a circle: fly a full circle from the dot to it
+    const d = document.getElementById("dome").getBoundingClientRect();
+    flyGhost(ghostRect(dotEl),
+      {left: d.left, top: d.top, w: d.width, h: d.width},
+      () => ov.classList.add("in"));
+  }
+  function closeDome() {
+    clearInterval(feedTimer);
+    const dot = dots.children[domeEp];
+    const visible = dot && dot.style.display !== "none";
+    ov.classList.remove("in");
+    if (!reduced() && visible) {
+      const d = document.getElementById("dome").getBoundingClientRect();
+      flyGhost({left: d.left, top: d.top, w: d.width, h: d.width},
+        ghostRect(dot), null);
+    }
+    ov.classList.remove("on");
+  }
   function renderDome() {
     const e = EPS[domeEp];
     document.getElementById("dome-title").textContent =
