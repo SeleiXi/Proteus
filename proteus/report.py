@@ -13,7 +13,9 @@ artifact.
 
 from __future__ import annotations
 
+import html
 import http.server
+import json
 import subprocess
 from pathlib import Path
 
@@ -49,6 +51,7 @@ th { border-top:none; color:var(--sub); font-weight:600; font-size:12px;
        border:1px solid var(--line); color:var(--sub) }
 .done { color:var(--accent); border-color:var(--accent) }
 .bad  { color:var(--bad); border-color:var(--bad) }
+.audit-counts { white-space:nowrap; font-size:12px }
 .audit-links a { color:var(--accent); margin-right:10px }
 footer { color:var(--sub); margin-top:16px; font-size:12px }
 </style>
@@ -60,13 +63,13 @@ footer { color:var(--sub); margin-top:16px; font-size:12px }
 <th>arm</th><th>seed</th><th>progress</th><th>episodes</th><th>tool calls</th>
 <th>units by surface</th><th>growth</th><th>last score</th><th>status</th>
 </tr></thead><tbody id="rows"></tbody></table>
-<section id="audit-section" hidden>
+<section id="audit-section"__AUDIT_HIDDEN__>
 <h2>Safety audits</h2>
 <div class="sub">post-run evidence; never fed back into evolution</div>
 <table><thead><tr>
 <th>audit</th><th>suite</th><th>status counts</th><th>targets</th>
 <th>evidence methods</th><th>artifacts</th>
-</tr></thead><tbody id="audit-rows"></tbody></table>
+</tr></thead><tbody id="audit-rows">__AUDIT_ROWS__</tbody></table>
 </section>
 <footer id="foot"></footer>
 <script>
@@ -84,47 +87,6 @@ function spark(recs, key){
     return `<polyline fill="none" stroke="var(--accent)" stroke-opacity="${1-i*0.35}"
       stroke-width="1.5" stroke-dasharray="${dash}" points="${pts.join(" ")}"/>`; };
   return `<svg class="spark" viewBox="0 0 ${W} ${H}">${names.map(line).join("")}</svg>`;
-}
-async function maybeJson(u){
-  try { const r = await fetch(u,{cache:"no-store"}); return r.ok ? await r.json() : null; }
-  catch(e) { return null; }
-}
-function countText(value){
-  const entries = Object.entries(value||{});
-  return entries.length ? entries.map(([k,v])=>`${k}:${v}`).join("  ") : "—";
-}
-function textCell(row, value){
-  const cell = document.createElement("td");
-  cell.textContent = value;
-  row.appendChild(cell);
-}
-async function loadAudits(){
-  const index = await maybeJson("audits/index.json");
-  if(!index || !Array.isArray(index.audits) || !index.audits.length) return;
-  const body = document.getElementById("audit-rows");
-  for(const audit of index.audits){
-    if(typeof audit.summary !== "string" || audit.summary.includes("..")) continue;
-    const summary = await maybeJson(`audits/${audit.summary}`);
-    if(!summary) continue;
-    const row = document.createElement("tr");
-    textCell(row, String(audit.id||"—"));
-    textCell(row, `${audit.suite||"—"} ${audit.version||""}`.trim());
-    textCell(row, countText(summary.status_counts));
-    textCell(row, countText(summary.target_counts));
-    textCell(row, countText(summary.evidence_method_counts));
-    const links = document.createElement("td");
-    links.className = "audit-links";
-    for(const [label,path] of [["summary",audit.summary],["results",audit.results]]){
-      if(typeof path !== "string" || path.includes("..")) continue;
-      const link = document.createElement("a");
-      link.href = `audits/${path}`;
-      link.textContent = label;
-      links.appendChild(link);
-    }
-    row.appendChild(links);
-    body.appendChild(row);
-  }
-  if(body.children.length) document.getElementById("audit-section").hidden = false;
 }
 async function tick(){
   const m = await (await fetch("manifest.json",{cache:"no-store"})).json();
@@ -154,16 +116,87 @@ async function tick(){
   document.getElementById("foot").textContent =
     `refreshed ${new Date().toLocaleTimeString()} — polls every 5s while the sweep runs`;
 }
-tick(); loadAudits(); setInterval(tick, 5000);
+tick(); setInterval(tick, 5000);
 </script>
 </body>
 </html>
 """
 
 
+def _safe_audit_path(value: object) -> str | None:
+    if not isinstance(value, str) or not value or "\\" in value:
+        return None
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts:
+        return None
+    return path.as_posix()
+
+
+def _count_text(value: object) -> str:
+    if not isinstance(value, dict) or not value:
+        return "—"
+    return "  ".join(f"{key}:{value[key]}" for key in sorted(value))
+
+
+def _audit_rows(sweep_root: Path) -> list[str]:
+    audits_root = sweep_root / "audits"
+    try:
+        index = json.loads((audits_root / "index.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    entries = index.get("audits") if isinstance(index, dict) else None
+    if not isinstance(entries, list):
+        return []
+
+    rows: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        audit_id = entry.get("id")
+        suite = entry.get("suite")
+        version = entry.get("version")
+        summary_ref = _safe_audit_path(entry.get("summary"))
+        results_ref = _safe_audit_path(entry.get("results"))
+        if not all(isinstance(value, str) for value in (audit_id, suite, version)):
+            continue
+        if summary_ref is None or results_ref is None:
+            continue
+        try:
+            summary = json.loads(
+                (audits_root / summary_ref).read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(summary, dict):
+            continue
+        cells = (
+            str(audit_id),
+            f"{suite} {version}".strip(),
+            _count_text(summary.get("status_counts")),
+            _count_text(summary.get("target_counts")),
+            _count_text(summary.get("evidence_method_counts")),
+        )
+        rendered = "".join(
+            f'<td class="audit-counts">{html.escape(cell)}</td>'
+            if position >= 2
+            else f"<td>{html.escape(cell)}</td>"
+            for position, cell in enumerate(cells)
+        )
+        links = (
+            f'<a href="audits/{html.escape(summary_ref, quote=True)}">summary</a>'
+            f'<a href="audits/{html.escape(results_ref, quote=True)}">results</a>'
+        )
+        rows.append(f'<tr>{rendered}<td class="audit-links">{links}</td></tr>')
+    return rows
+
+
 def write_report(sweep_root: Path) -> Path:
-    out = Path(sweep_root) / "report.html"
-    out.write_text(_PAGE, encoding="utf-8")
+    root = Path(sweep_root)
+    rows = _audit_rows(root)
+    page = _PAGE.replace("__AUDIT_HIDDEN__", "" if rows else " hidden")
+    page = page.replace("__AUDIT_ROWS__", "\n".join(rows))
+    out = root / "report.html"
+    out.write_text(page, encoding="utf-8")
     return out
 
 
