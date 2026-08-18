@@ -233,6 +233,31 @@ proteus watch --out runs/demo          # http://localhost:8300/report.html
 Tracking data (condition labels, hidden scores) lives at the sweep level, outside run
 roots, so the evolving agent can never read its own condition.
 
+## 🛡️ Safety auditing
+
+Proteus keeps three kinds of evidence separate:
+
+| signal | role |
+|---|---|
+| task evaluator | measures the configured objective and may be visible or used by selection |
+| agent self-evaluation | reflect-phase subject claim, retained only as diagnostic evidence |
+| safety audit oracle | independent post-run observation, never fed back into evolution |
+
+Audit a completed sweep without changing any run, prompt, selection, or snapshot:
+
+```bash
+proteus audit --harness minimal --out runs/demo \
+    --audit-id instrument-integrity-v1
+proteus report --out runs/demo             # regenerate the report with the audit table
+```
+
+Audit manifests, JSONL results, summaries, and evidence live under `runs/demo/audits/`,
+outside every evolving harness. Outcomes preserve `not_evaluated`, `invalid`, and `error`;
+`not_evaluated` is not a pass, and Proteus does not collapse unlike cases into a safety
+score. The default `instrument-integrity` suite verifies that snapshots and normalized
+traces are observable—it does **not** establish general harness safety. Adapter-specific
+suites plug in with `--suite <module>:<object>`.
+
 ## 📊 Status
 
 `v0.1` (research preview). Working today: the offline `minimal` harness with the full

@@ -115,3 +115,44 @@ module: the only bridge to the grader is `git diff base_commit` (so the task wor
 be that repo at that commit — `setup` clones it), the upstream cache keys on
 `(run_id, instance_id)` and ignores the patch (so the run id embeds the episode), and every
 distinct instance is another image (so pin a small fixed set).
+
+## Post-run safety audit
+
+Safety auditing is a second, read-only pass over a completed trajectory. It never changes
+the episode prompts, goal evaluator, accept/reject selection, or later harness state.
+
+```bash
+# 1. Produce a complete offline trajectory.
+proteus run --harness minimal --arm neutral \
+    --seeds 1 --episodes 2 --out runs/audit-demo
+
+# 2. Audit immutable episode snapshots and normalized traces.
+proteus audit --harness minimal --out runs/audit-demo \
+    --audit-id instrument-integrity-v1
+
+# 3. Generate and serve the report after the audit is published.
+proteus report --out runs/audit-demo
+proteus watch --out runs/audit-demo
+```
+
+The default suite checks the measurement substrate: snapshot materialization, trace
+availability, canonical phase names, and whether a reflect-phase self-assessment signal was
+exposed. It does not claim that the harness is safe. The report renders audit counts in a
+separate table; audit results never become task scores or evolution feedback.
+
+Use a custom adapter-specific suite through the same extension style as harness adapters:
+
+```bash
+proteus audit --harness mypkg.adapter:MyHarness --out runs/my-study \
+    --suite mypkg.safety:SUITE --audit-id native-cases-v1
+```
+
+An artifact suite receives a disposable materialization, the adapter's declared `Surface`s,
+and its normalized `ActionEvent` trace. If a case needs to execute historical or
+agent-authored code, the suite must run a separate disposable copy inside an OS containment
+boundary; it must never mount the source trajectory read-write.
+
+An Aki-specific pack can map native Memory, Skills, and Authored Tools evidence into the
+portable taxonomy without hard-coding those surface names into Proteus core. Composition is
+recorded as a cross-surface scope, and missing native permission/tool-result evidence stays
+`not_evaluated`.
