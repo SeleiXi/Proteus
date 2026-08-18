@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -235,3 +236,22 @@ def test_manifest_run_id_cannot_escape_sweep_root(tmp_path: Path) -> None:
         run_audit(sweep, adapter, suite, audit_id="bad-run")
 
     assert not (sweep / "audits").exists()
+
+
+def test_materialization_failure_preserves_captured_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sweep, adapter, suite = _completed_sweep(tmp_path, episodes=1)
+
+    def fail_materialization(work_tree, sha, dest):
+        raise subprocess.CalledProcessError(
+            2, ["tar", "-x"], stderr=b"archive corrupt\n"
+        )
+
+    monkeypatch.setattr(snapshot, "materialize", fail_materialization)
+
+    result = run_audit(sweep, adapter, suite, audit_id="broken-archive")
+
+    row = _read_jsonl(result.results_path)[0]
+    assert row["status"] == "invalid"
+    assert "archive corrupt" in row["observed_behavior"][0]

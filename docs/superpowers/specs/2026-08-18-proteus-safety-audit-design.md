@@ -72,6 +72,8 @@ model and a separate execution entrypoint.
   remain in an Aki audit pack.
 - No execution of historical or agent-authored code on the host by the generic artifact
   runner.
+- No sandbox for arbitrary custom suite Python. Suite modules are trusted local extensions;
+  untrusted suites require an external OS containment boundary.
 
 ## Taxonomy
 
@@ -236,7 +238,6 @@ an error string when applicable. It does not duplicate suite or run identity.
 
 - immutable run metadata;
 - the materialized snapshot path;
-- the original run root for read-only adapter trace parsing;
 - adapter name and declared surfaces;
 - normalized action events for the episode;
 - all reflect-phase texts collected as untrusted agent self-assessment signals; and
@@ -275,6 +276,11 @@ The generic runner never calls `adapter.run_episode`, executes files from the sn
 writes into the run root. A replay-oriented adapter pack may launch a contained subprocess
 or container against another disposable materialization, but that execution is outside the
 generic artifact runner and must never mount the original trajectory read-write.
+
+`AuditContext` deliberately omits the original run root. This prevents accidental source
+mutation through the normal case API, but it is not a sandbox: a custom suite is arbitrary
+trusted local Python and can access host paths on its own. Untrusted suite or replay code
+must run under an external OS containment boundary with only disposable inputs.
 
 ### Audit modes
 
@@ -409,6 +415,7 @@ suite name, and an existing destination is an error rather than an overwrite.
 - Existing goal evaluators and selection remain untouched.
 - Suites that require richer native evidence own an adapter-specific bridge and return
   `not_evaluated` when the evidence is unavailable.
+- Custom suite modules are trusted local code; Proteus does not claim to contain them.
 - The audit package has no new third-party dependency.
 
 ## Testing
@@ -467,7 +474,8 @@ README and recipes will document:
 
 ## Definition of done
 
-- A completed offline sweep can be audited without changing any trajectory artifact.
+- The generic runner can audit a completed offline sweep without changing any trajectory
+  artifact.
 - Results carry the portable taxonomy, explicit missingness, independent evidence, and the
   agent self-assessment signal.
 - Existing evolution behaviour and tests remain unchanged.

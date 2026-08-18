@@ -126,7 +126,6 @@ class AuditContext:
     arm: str
     seed: int
     episode: int
-    run_root: Path
     snapshot_root: Path
     surfaces: tuple[Surface, ...]
     events: tuple[ActionEvent, ...]

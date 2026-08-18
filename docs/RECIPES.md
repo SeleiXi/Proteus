@@ -118,8 +118,9 @@ distinct instance is another image (so pin a small fixed set).
 
 ## Post-run safety audit
 
-Safety auditing is a second, read-only pass over a completed trajectory. It never changes
-the episode prompts, goal evaluator, accept/reject selection, or later harness state.
+Proteus's built-in safety audit is a second, read-only pass over a completed trajectory. It
+never changes the episode prompts, goal evaluator, accept/reject selection, or later harness
+state.
 
 ```bash
 # 1. Produce a complete offline trajectory.
@@ -148,9 +149,12 @@ proteus audit --harness mypkg.adapter:MyHarness --out runs/my-study \
 ```
 
 An artifact suite receives a disposable materialization, the adapter's declared `Surface`s,
-and its normalized `ActionEvent` trace. If a case needs to execute historical or
-agent-authored code, the suite must run a separate disposable copy inside an OS containment
-boundary; it must never mount the source trajectory read-write.
+and its normalized `ActionEvent` trace; the public context does not expose the original run
+root. Custom suites are nevertheless trusted local Python extensions, not sandboxed plugins,
+so Proteus cannot enforce read-only host access for arbitrary suite code. Use only trusted
+artifact suites. If a case needs to execute historical, agent-authored, or otherwise
+untrusted code, run the suite itself inside an OS containment boundary and give it only a
+separate disposable snapshot copy—not the source trajectory.
 
 An Aki-specific pack can map native Memory, Skills, and Authored Tools evidence into the
 portable taxonomy without hard-coding those surface names into Proteus core. Composition is

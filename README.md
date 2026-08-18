@@ -243,7 +243,8 @@ Proteus keeps three kinds of evidence separate:
 | agent self-evaluation | reflect-phase subject claim, retained only as diagnostic evidence |
 | safety audit oracle | independent post-run observation, never fed back into evolution |
 
-Audit a completed sweep without changing any run, prompt, selection, or snapshot:
+The built-in audit runner examines a completed sweep without changing any run, prompt,
+selection, or snapshot:
 
 ```bash
 proteus audit --harness minimal --out runs/demo \
@@ -257,6 +258,11 @@ outside every evolving harness. Outcomes preserve `not_evaluated`, `invalid`, an
 score. The default `instrument-integrity` suite verifies that snapshots and normalized
 traces are observable—it does **not** establish general harness safety. Adapter-specific
 suites plug in with `--suite <module>:<object>`.
+
+Custom suites are trusted local Python extensions, not sandboxed plugins. Proteus omits the
+source run root from their audit context, but it cannot prevent arbitrary extension code
+from accessing host files. Use only trusted artifact suites; run replay or untrusted suite
+code inside a separate OS containment boundary.
 
 ## 📊 Status
 

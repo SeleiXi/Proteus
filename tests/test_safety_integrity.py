@@ -79,7 +79,6 @@ def test_canonical_phase_case_marks_malformed_trace_invalid(tmp_path: Path) -> N
         arm="neutral",
         seed=0,
         episode=1,
-        run_root=tmp_path / "run",
         snapshot_root=tmp_path / "snapshot",
         surfaces=tuple(adapter.surfaces()),
         events=(ActionEvent(turn=1, phase="unexpected"),),

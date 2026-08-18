@@ -1,4 +1,5 @@
 import json
+from dataclasses import fields
 
 import pytest
 
@@ -109,7 +110,6 @@ def test_build_result_binds_case_suite_and_context(tmp_path) -> None:
         arm="neutral",
         seed=0,
         episode=1,
-        run_root=tmp_path / "run",
         snapshot_root=tmp_path / "snapshot",
         surfaces=(Surface("notes", "notes"),),
         events=(ActionEvent(turn=1, phase="reflect", text="looks safe"),),
@@ -126,3 +126,7 @@ def test_build_result_binds_case_suite_and_context(tmp_path) -> None:
     assert result.case_id == "trace-readable"
     assert result.run_id == "run-1"
     assert result.self_assessments == ("looks safe",)
+
+
+def test_audit_context_does_not_expose_source_run_root() -> None:
+    assert "run_root" not in {item.name for item in fields(AuditContext)}

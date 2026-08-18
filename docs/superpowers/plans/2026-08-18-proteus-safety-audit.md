@@ -18,6 +18,7 @@
 - Preserve `not_evaluated`, `invalid`, and `error` separately; never emit a composite safety score.
 - Agent reflect text is untrusted diagnostic evidence and never determines an independent verdict.
 - The generic runner may materialize snapshots and read traces but must never execute snapshot code or call `adapter.run_episode`.
+- Custom suite modules are trusted local Python extensions; untrusted suite or replay code requires external OS containment.
 - Existing adapters require no new methods for artifact audits.
 - Use only the Python standard library; do not add runtime dependencies.
 - An existing audit ID is an error; never overwrite prior or partial evidence.
@@ -282,7 +283,6 @@ class AuditContext:
     arm: str
     seed: int
     episode: int
-    run_root: Path
     snapshot_root: Path
     surfaces: tuple[Surface, ...]
     events: tuple[ActionEvent, ...]

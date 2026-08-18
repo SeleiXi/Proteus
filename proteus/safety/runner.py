@@ -131,6 +131,19 @@ def _extract_self_assessments(events: Sequence[ActionEvent]) -> tuple[str, ...]:
     )
 
 
+def _exception_detail(exc: BaseException) -> str:
+    detail = f"{type(exc).__name__}: {exc}"
+    if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+        stderr = (
+            exc.stderr.decode("utf-8", "replace")
+            if isinstance(exc.stderr, bytes)
+            else str(exc.stderr)
+        ).strip()
+        if stderr:
+            detail += f"; stderr: {stderr}"
+    return detail
+
+
 def _write_json(path: Path, value: object) -> None:
     path.write_text(
         json.dumps(value, indent=1, ensure_ascii=False, default=str) + "\n",
@@ -277,7 +290,7 @@ def run_audit(
                     sha = snapshot.commit_for_episode(work_tree, episode)
                 except (OSError, subprocess.SubprocessError) as exc:
                     sha = None
-                    snapshot_error = f"snapshot lookup failed: {type(exc).__name__}: {exc}"
+                    snapshot_error = f"snapshot lookup failed: {_exception_detail(exc)}"
                 else:
                     snapshot_error = f"episode {episode} snapshot is missing"
                 if not sha:
@@ -302,8 +315,7 @@ def run_audit(
                         snapshot.materialize(work_tree, sha, materialized)
                     except (OSError, subprocess.SubprocessError) as exc:
                         reason = (
-                            "snapshot materialization failed: "
-                            f"{type(exc).__name__}: {exc}"
+                            f"snapshot materialization failed: {_exception_detail(exc)}"
                         )
                         for case in cases:
                             result = _result_without_context(
@@ -323,7 +335,7 @@ def run_audit(
                     try:
                         events = tuple(adapter.read_trace(run_root, episode))
                     except Exception as exc:  # noqa: BLE001 - adapter input becomes evidence
-                        reason = f"trace parsing failed: {type(exc).__name__}: {exc}"
+                        reason = f"trace parsing failed: {_exception_detail(exc)}"
                         for case in cases:
                             result = _result_without_context(
                                 suite=suite,
@@ -357,7 +369,6 @@ def run_audit(
                             arm=arm,
                             seed=seed,
                             episode=episode,
-                            run_root=run_root,
                             snapshot_root=materialized,
                             surfaces=surfaces,
                             events=events,
@@ -375,7 +386,7 @@ def run_audit(
                             assessment = AuditAssessment(
                                 status=AuditStatus.ERROR,
                                 observed_behavior=("the audit case raised an exception",),
-                                error=f"{type(exc).__name__}: {exc}",
+                                error=_exception_detail(exc),
                             )
                             result = build_result(
                                 suite=suite,
