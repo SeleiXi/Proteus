@@ -5,245 +5,87 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Proteus — self-evolution for any agent harness</title>
 <link rel="stylesheet" href="assets/site.css">
+<style>
+html { scroll-snap-type:y proximity }
+section.snap { height:100vh; scroll-snap-align:start; position:relative;
+  display:flex; flex-direction:column; align-items:center; justify-content:center }
+#corner-nav { position:fixed; top:16px; right:20px; z-index:40; display:flex; gap:18px }
+#corner-nav a { font:11px "SF Mono",ui-monospace,monospace; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--soft) }
+#corner-nav a:hover { color:var(--anchor) }
+
+/* the full-viewport stage: behind the hero, front for the trace section */
+#stage { position:fixed; inset:0; z-index:1; opacity:.16; pointer-events:none;
+  transition:opacity .8s cubic-bezier(.32,.72,0,1);
+  display:flex; flex-direction:column; justify-content:center; padding:8vh 5vw }
+body.trace-front #stage { opacity:1; pointer-events:auto }
+#traj { width:100%; max-height:62vh; display:block }
+#traj .axis { stroke:var(--rule) }
+#traj .tline { stroke:var(--soft); fill:none; stroke-width:1.2 }
+#traj circle { cursor:pointer }
+#traj circle.cur { animation:pulse 1.6s infinite }
+#stage-cap { display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap }
+#tick-line { min-height:20px; color:var(--anchor-hi) }
+.hero-sec { z-index:2; text-align:center; pointer-events:none }
+.hero-sec > * { pointer-events:auto }
+.hero-sec .down { position:absolute; bottom:30px; left:50%;
+  transform:translateX(-50%); color:var(--dim); animation:bob 2.4s infinite;
+  pointer-events:none }
+@keyframes bob { 0%,100%{transform:translate(-50%,0)} 50%{transform:translate(-50%,8px)} }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+@media (prefers-reduced-motion: reduce) {
+  .hero-sec .down, #traj circle.cur, .sp-dot { animation:none } }
+.trace-hint { position:absolute; top:9vh; left:5vw; z-index:2; pointer-events:none;
+  opacity:0; transition:opacity .8s }
+body.trace-front .trace-hint { opacity:1 }
+.rest { position:relative; z-index:2; background:var(--bg);
+  border-top:1px solid var(--rule); scroll-snap-align:start }
+.sp-dot { width:7px; height:7px; border-radius:50%; background:var(--anchor-hi);
+  display:inline-block; margin-right:8px; animation:pulse 1.6s ease-in-out infinite }
+</style>
 </head>
 <body>
-<header class="site">
-  <img src="assets/proteus-logo.png" alt="">
-  <span class="name">PROTEUS</span>
-  <nav>
-    <a href="playground.html">Playground</a>
-    <a href="https://github.com/yichen14/Proteus">GitHub</a>
-    <a href="https://github.com/yichen14/Proteus/blob/main/docs/RECIPES.md">Recipes</a>
-  </nav>
-</header>
+<nav id="corner-nav">
+  <a href="playground.html">Playground</a>
+  <a href="https://github.com/yichen14/Proteus">GitHub</a>
+</nav>
 
-<div class="hero">
+<div id="stage">
+  <div class="micro" style="margin-bottom:14px"><span class="sp-dot"></span>
+    a real run, replaying · one episode every 30s</div>
+  <svg id="traj" viewBox="0 0 1000 520" aria-label="evolution trajectory"></svg>
+  <div id="stage-cap">
+    <span class="micro" id="tick-line"></span>
+    <span class="micro" id="case-foot"></span>
+  </div>
+</div>
+
+<section class="snap hero-sec">
   <div class="kicker micro">an open instrument · est. 2026 · MIT</div>
-  <img class="logo" src="assets/proteus-logo.png" alt="Proteus">
-  <h1>Self-evolution for <em>any</em> agent harness.</h1>
-  <div class="slog">Plug in. Evolve. Measure.</div>
-  <div class="cta">
+  <img class="logo" src="assets/proteus-logo.png" alt="Proteus"
+    style="width:120px;background:#fff;padding:12px;border:1px solid var(--rule)">
+  <h1 style="font-size:clamp(30px,4.6vw,52px);font-weight:400;line-height:1.12;
+    margin:26px auto 12px;max-width:20ch;text-wrap:balance">
+    Self-evolution for <em style="font-style:italic;color:var(--anchor-hi)">any</em>
+    agent harness.</h1>
+  <div class="slog" style="color:var(--soft)">Plug in. Evolve. Measure.</div>
+  <div class="cta" style="margin-top:34px;display:flex;gap:14px;justify-content:center">
     <a class="btn primary" href="playground.html">Launch Playground</a>
     <a class="btn" href="https://github.com/yichen14/Proteus">Star on GitHub</a>
   </div>
+  <div class="down">↓</div>
+</section>
 
-  <a href="#" class="case" id="case-stage">
-    <div class="micro sp-head"><span class="sp-dot"></span>
-      <span id="case-head">a real run, replaying · one episode every 30s ·
-      click any dot to step inside</span></div>
-    <svg id="traj" viewBox="0 0 640 150" aria-label="evolution trajectory"></svg>
-    <div class="micro" id="tick-line"></div>
-    <div class="micro sp-foot" id="case-foot"></div>
-  </a>
-</div>
-
-<div id="dome-overlay">
-  <div class="dome-top">
-    <span class="micro" id="dome-title"></span>
-    <span class="dome-nav">
-      <a href="#" id="dome-prev">‹ prev</a>
-      <a href="#" id="dome-next">next ›</a>
-      <a href="#" id="dome-close">✕ close</a>
-    </span>
+<section class="snap" id="trace-sec">
+  <div class="trace-hint">
+    <div class="micro">the specimen · research fleet · control arm — no goal,
+      no injected preference</div>
+    <div class="micro" style="margin-top:4px;color:var(--dim)">click any dot to step
+      inside an episode · scroll on for the instrument</div>
   </div>
-  <div class="dome-grid">
-    <div class="dome-side">
-      <h3>setup</h3>
-      <div class="kv" id="dome-setup"></div>
-    </div>
-    <div class="dome-stage">
-      <div class="dome" id="dome">
-        <div class="micro" id="dome-phase"></div>
-        <div id="dome-feed"></div>
-      </div>
-    </div>
-    <div class="dome-side">
-      <h3>measurement · this episode</h3>
-      <div class="kv" id="dome-meas"></div>
-    </div>
-  </div>
-</div>
+</section>
 
-<style>
-:root { --s-memory:#4F6DF5 }
-.case { display:block; max-width:660px; margin:52px auto 0; text-align:left;
-  border:1px solid var(--rule); background:var(--panel); padding:16px 18px 12px;
-  text-decoration:none; color:var(--ink) }
-.case:hover { border-color:var(--anchor); text-decoration:none }
-.sp-head { display:flex; align-items:center; gap:8px; margin-bottom:10px }
-.sp-dot { width:7px; height:7px; border-radius:50%; background:var(--anchor-hi);
-  animation:pulse 1.6s ease-in-out infinite; flex:none }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
-@media (prefers-reduced-motion: reduce){ .sp-dot{animation:none} }
-#traj { width:100%; display:block }
-#traj .axis { stroke:var(--rule) }
-#traj .tline { stroke:var(--soft); fill:none; stroke-width:1 }
-#traj circle { cursor:pointer }
-#traj circle.cur { animation:pulse 1.6s infinite }
-#tick-line { min-height:17px; color:var(--anchor-hi) }
-.sp-foot { margin-top:8px; color:var(--dim) }
-
-#dome-overlay { position:fixed; inset:0; background:var(--bg); z-index:50;
-  display:none; flex-direction:column; padding:18px 22px; overflow-y:auto }
-#dome-overlay.on { display:flex }
-.dome-top { display:flex; justify-content:space-between; align-items:center;
-  margin-bottom:8px }
-.dome-nav a { margin-left:18px; font:12px "SF Mono",ui-monospace,monospace;
-  letter-spacing:.1em; text-transform:uppercase }
-.dome-grid { flex:1; display:grid; grid-template-columns:220px 1fr 220px; gap:26px;
-  align-items:end; max-width:1200px; margin:0 auto; width:100% }
-@media (max-width:900px){ .dome-grid { grid-template-columns:1fr; align-items:start } }
-.dome-side { padding-bottom:4vh }
-.dome-side .kv { font-size:13px }
-.dome-side .kv .micro { display:block; margin:10px 0 1px }
-.dome-stage { display:flex; justify-content:center }
-.dome { width:min(92vw,680px); height:min(46vw,340px); position:relative;
-  border:1px solid var(--soft); border-bottom:none;
-  border-radius:min(46vw,340px) min(46vw,340px) 0 0;
-  background:var(--panel); overflow:hidden;
-  display:flex; flex-direction:column; align-items:center; justify-content:flex-end }
-#dome-phase { position:absolute; top:12%; letter-spacing:.3em;
-  color:var(--anchor-hi) }
-#dome-feed { width:72%; max-height:62%; overflow:hidden; font:12.5px/1.9 "SF Mono",
-  ui-monospace,monospace; padding-bottom:14px; mask-image:linear-gradient(
-  to bottom, transparent, black 18%) }
-#dome-feed .st { display:flex; gap:10px; align-items:baseline }
-#dome-feed .st .ph { color:var(--dim); width:64px; flex:none; font-size:10.5px;
-  text-transform:uppercase; letter-spacing:.08em }
-#dome-feed .st .tg { color:var(--soft) }
-#dome-feed .st.w .tl { color:var(--anchor-hi) }
-.meas-bar { height:5px; background:var(--anchor); margin:3px 0 8px }
-</style>
-<script src="assets/case-data.js"></script>
-<script>
-(() => {
-  const C = window.CASE, EPS = C.episodes, N = EPS.length;
-  const SURF = {memory:"var(--s-memory)", skills:"var(--s-skills)", tools:"var(--s-tools)"};
-  const WRITE = /write|edit|update|append/;
-  const svg = document.getElementById("traj");
-  const W = 640, H = 150, PAD = 26;
-  const maxU = Math.max(...EPS.map(e => e.units.memory + e.units.skills + e.units.tools));
-  const xy = i => [PAD + i*(W-2*PAD)/(N-1),
-    H-18 - (EPS[i].units.memory+EPS[i].units.skills+EPS[i].units.tools)/maxU*(H-42)];
-  const dom = i => {
-    const e = EPS[i], p = i ? EPS[i-1].units : {memory:0,skills:0,tools:0};
-    let best = "memory", bd = -1;
-    for (const s of Object.keys(e.units)) {
-      const d = e.units[s]-p[s]; if (d > bd) { bd = d; best = s; }
-    }
-    return bd > 0 ? SURF[best] : "var(--s-none)";
-  };
-  svg.innerHTML = `<line class="axis" x1="${PAD}" y1="${H-18}" x2="${W-PAD}" y2="${H-18}"/>
-    <text x="${PAD}" y="${H-4}" class="micro" fill="var(--dim)" font-size="9">ep 1</text>
-    <text x="${W-PAD}" y="${H-4}" text-anchor="end" class="micro" fill="var(--dim)"
-      font-size="9">ep ${N}</text>
-    <polyline class="tline" id="tj-line" points=""/>
-    <g id="tj-dots"></g>`;
-  const dots = document.getElementById("tj-dots");
-  EPS.forEach((e,i) => {
-    const [x,y] = xy(i);
-    const c = document.createElementNS("http://www.w3.org/2000/svg","circle");
-    c.setAttribute("cx",x); c.setAttribute("cy",y); c.setAttribute("r",4.2);
-    c.setAttribute("fill", dom(i)); c.dataset.i = i; c.style.display = "none";
-    c.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation();
-      openDome(i); });
-    dots.appendChild(c);
-  });
-
-  // ---- ambient clock: one episode per 30s, ticker steps through real steps
-  let cur = 0, stepIdx = 0, stepTimer = null;
-  const EP_MS = 30000;
-  function reveal(n) {
-    [...dots.children].forEach((c,i) => {
-      c.style.display = i <= n ? "" : "none";
-      c.classList.toggle("cur", i === n);
-    });
-    document.getElementById("tj-line").setAttribute("points",
-      EPS.slice(0, n+1).map((_,i) => xy(i).join(",")).join(" "));
-    const u = EPS[n].units;
-    document.getElementById("case-foot").textContent =
-      `${C.meta.kind} · ep ${EPS[n].ep}/${N} · memory ${u.memory} · skills ${u.skills}` +
-      ` · tools ${u.tools} · ${C.meta.arm}`;
-  }
-  function tickStep() {
-    const steps = EPS[cur].steps;
-    if (!steps.length) return;
-    const [ph, tool, tgt] = steps[stepIdx % steps.length];
-    document.getElementById("tick-line").textContent =
-      `live · ${ph} · ${tool}${tgt ? " → " + tgt : ""}`;
-    stepIdx++;
-  }
-  function startEpisode(i) {
-    cur = i; stepIdx = 0; reveal(i);
-    clearInterval(stepTimer);
-    const steps = Math.max(EPS[i].steps.length, 1);
-    stepTimer = setInterval(tickStep, Math.max(EP_MS/steps, 350));
-    tickStep();
-  }
-  startEpisode(0);
-  if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
-    setInterval(() => startEpisode((cur+1) % N), EP_MS);
-
-  // ---- the dome
-  const ov = document.getElementById("dome-overlay");
-  let domeEp = 0, feedTimer = null;
-  function openDome(i) {
-    domeEp = i; ov.classList.add("on"); renderDome();
-  }
-  function closeDome() { ov.classList.remove("on"); clearInterval(feedTimer); }
-  function renderDome() {
-    const e = EPS[domeEp];
-    document.getElementById("dome-title").textContent =
-      `episode ${e.ep} of ${N} · ${C.meta.kind}`;
-    const m = C.meta;
-    document.getElementById("dome-setup").innerHTML = [
-      ["harness", m.harness], ["model", m.model], ["arm", m.arm],
-      ["goal", m.goal], ["sandbox", m.sandbox], ["note", m.disclosure],
-    ].map(([k,v]) => `<span class="micro">${k}</span>${v}`).join("");
-    const counts = {};
-    e.steps.forEach(s => counts[s[1]] = (counts[s[1]]||0) + 1);
-    const top = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0,5);
-    const mx = top.length ? top[0][1] : 1;
-    document.getElementById("dome-meas").innerHTML = `
-      <span class="micro">state after</span>
-      memory ${e.units.memory} · skills ${e.units.skills} · tools ${e.units.tools}
-      <span class="micro">Δ this episode</span>
-      +${e.d.a} added · ${e.d.r} revised · ${e.d.d} dropped
-      <span class="micro">tool calls</span>${e.steps.length}
-      <span class="micro">top tools</span>` +
-      top.map(([t,n]) => `<div>${t} · ${n}
-        <div class="meas-bar" style="width:${Math.round(100*n/mx)}%"></div></div>`).join("");
-    // replay the feed
-    const feed = document.getElementById("dome-feed");
-    feed.innerHTML = "";
-    clearInterval(feedTimer);
-    let j = 0;
-    const ms = Math.max(120, Math.min(400, 12000 / e.steps.length));
-    feedTimer = setInterval(() => {
-      if (j >= e.steps.length) { clearInterval(feedTimer); return; }
-      const [ph, tool, tgt] = e.steps[j++];
-      document.getElementById("dome-phase").textContent = ph.toUpperCase();
-      const d = document.createElement("div");
-      d.className = "st" + (WRITE.test(tool) ? " w" : "");
-      d.innerHTML = `<span class="ph">${ph}</span>
-        <span class="tl">${tool}</span><span class="tg">${tgt || ""}</span>`;
-      feed.appendChild(d);
-      feed.scrollTop = feed.scrollHeight;
-      while (feed.children.length > 14) feed.removeChild(feed.firstChild);
-    }, ms);
-  }
-  document.getElementById("dome-close").onclick = e => { e.preventDefault(); closeDome(); };
-  document.getElementById("dome-prev").onclick = e => { e.preventDefault();
-    if (domeEp > 0) { domeEp--; renderDome(); } };
-  document.getElementById("dome-next").onclick = e => { e.preventDefault();
-    if (domeEp < N-1) { domeEp++; renderDome(); } };
-  document.addEventListener("keydown", e => { if (e.key === "Escape") closeDome(); });
-  document.getElementById("case-stage").addEventListener("click", e => {
-    e.preventDefault(); openDome(cur);
-  });
-})();
-</script>
-
+<div class="rest">
 <div class="wrap">
   <div class="grid">
     <div class="card">
@@ -265,6 +107,7 @@
     </div>
   </div>
 
+  
   <h2>The evolve loop</h2>
   <div class="loop-wrap">
     <div class="loop-stage">
@@ -434,6 +277,7 @@ if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
   setInterval(() => { if (!manual) setPhase((cur+1)%4); }, 2600);
 </script>
 
+  
   <h2>60-second demo · no key · no docker</h2>
   <pre class="cmd">pip install proteus-evolve   # or: git clone github.com/yichen14/Proteus && pip install -e .
 proteus run --harness minimal --arm neutral --arm review:notes --arm review:tools \
@@ -443,5 +287,222 @@ proteus measure --harness minimal --out runs/demo</pre>
 
 <footer class="site">Proteus · plug in / evolve / measure ·
 <a href="https://github.com/yichen14/Proteus">github.com/yichen14/Proteus</a></footer>
+</div>
+
+<div id="dome-overlay">
+  <div class="dome-top">
+    <span class="micro" id="dome-title"></span>
+    <span class="dome-nav">
+      <a href="#" id="dome-prev">‹ prev</a>
+      <a href="#" id="dome-next">next ›</a>
+      <a href="#" id="dome-close">✕ close</a>
+    </span>
+  </div>
+  <div class="dome-grid">
+    <div class="dome-side">
+      <h3>setup</h3>
+      <div class="kv" id="dome-setup"></div>
+    </div>
+    <div class="dome-stage">
+      <div class="dome" id="dome">
+        <div class="micro" id="dome-phase"></div>
+        <div id="dome-feed"></div>
+      </div>
+    </div>
+    <div class="dome-side">
+      <h3>measurement · this episode</h3>
+      <div class="kv" id="dome-meas"></div>
+    </div>
+  </div>
+</div>
+
+
+
+<style>
+:root { --s-memory:#4F6DF5 }
+.case { display:block; max-width:660px; margin:52px auto 0; text-align:left;
+  border:1px solid var(--rule); background:var(--panel); padding:16px 18px 12px;
+  text-decoration:none; color:var(--ink) }
+.case:hover { border-color:var(--anchor); text-decoration:none }
+.sp-head { display:flex; align-items:center; gap:8px; margin-bottom:10px }
+.sp-dot { width:7px; height:7px; border-radius:50%; background:var(--anchor-hi);
+  animation:pulse 1.6s ease-in-out infinite; flex:none }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+@media (prefers-reduced-motion: reduce){ .sp-dot{animation:none} }
+#traj { width:100%; display:block }
+#traj .axis { stroke:var(--rule) }
+#traj .tline { stroke:var(--soft); fill:none; stroke-width:1 }
+#traj circle { cursor:pointer }
+#traj circle.cur { animation:pulse 1.6s infinite }
+#tick-line { min-height:17px; color:var(--anchor-hi) }
+.sp-foot { margin-top:8px; color:var(--dim) }
+
+#dome-overlay { position:fixed; inset:0; background:var(--bg); z-index:50;
+  display:none; flex-direction:column; padding:18px 22px; overflow-y:auto }
+#dome-overlay.on { display:flex }
+.dome-top { display:flex; justify-content:space-between; align-items:center;
+  margin-bottom:8px }
+.dome-nav a { margin-left:18px; font:12px "SF Mono",ui-monospace,monospace;
+  letter-spacing:.1em; text-transform:uppercase }
+.dome-grid { flex:1; display:grid; grid-template-columns:220px 1fr 220px; gap:26px;
+  align-items:end; max-width:1200px; margin:0 auto; width:100% }
+@media (max-width:900px){ .dome-grid { grid-template-columns:1fr; align-items:start } }
+.dome-side { padding-bottom:4vh }
+.dome-side .kv { font-size:13px }
+.dome-side .kv .micro { display:block; margin:10px 0 1px }
+.dome-stage { display:flex; justify-content:center }
+.dome { width:min(92vw,680px); height:min(46vw,340px); position:relative;
+  border:1px solid var(--soft); border-bottom:none;
+  border-radius:min(46vw,340px) min(46vw,340px) 0 0;
+  background:var(--panel); overflow:hidden;
+  display:flex; flex-direction:column; align-items:center; justify-content:flex-end }
+#dome-phase { position:absolute; top:12%; letter-spacing:.3em;
+  color:var(--anchor-hi) }
+#dome-feed { width:72%; max-height:62%; overflow:hidden; font:12.5px/1.9 "SF Mono",
+  ui-monospace,monospace; padding-bottom:14px; mask-image:linear-gradient(
+  to bottom, transparent, black 18%) }
+#dome-feed .st { display:flex; gap:10px; align-items:baseline }
+#dome-feed .st .ph { color:var(--dim); width:64px; flex:none; font-size:10.5px;
+  text-transform:uppercase; letter-spacing:.08em }
+#dome-feed .st .tg { color:var(--soft) }
+#dome-feed .st.w .tl { color:var(--anchor-hi) }
+.meas-bar { height:5px; background:var(--anchor); margin:3px 0 8px }
+</style>
+
+<script src="assets/case-data.js"></script>
+<script>
+(() => {
+  const C = window.CASE, EPS = C.episodes, N = EPS.length;
+  const SURF = {memory:"var(--s-memory)", skills:"var(--s-skills)", tools:"var(--s-tools)"};
+  const WRITE = /write|edit|update|append/;
+  const svg = document.getElementById("traj");
+  const W = 1000, H = 520, PAD = 60;
+  const maxU = Math.max(...EPS.map(e => e.units.memory + e.units.skills + e.units.tools));
+  const xy = i => [PAD + i*(W-2*PAD)/(N-1),
+    H-18 - (EPS[i].units.memory+EPS[i].units.skills+EPS[i].units.tools)/maxU*(H-42)];
+  const dom = i => {
+    const e = EPS[i], p = i ? EPS[i-1].units : {memory:0,skills:0,tools:0};
+    let best = "memory", bd = -1;
+    for (const s of Object.keys(e.units)) {
+      const d = e.units[s]-p[s]; if (d > bd) { bd = d; best = s; }
+    }
+    return bd > 0 ? SURF[best] : "var(--s-none)";
+  };
+  svg.innerHTML = `<line class="axis" x1="${PAD}" y1="${H-18}" x2="${W-PAD}" y2="${H-18}"/>
+    <text x="${PAD}" y="${H-4}" class="micro" fill="var(--dim)" font-size="12">ep 1</text>
+    <text x="${W-PAD}" y="${H-4}" text-anchor="end" class="micro" fill="var(--dim)"
+      font-size="12">ep ${N}</text>
+    <polyline class="tline" id="tj-line" points=""/>
+    <g id="tj-dots"></g>`;
+  const dots = document.getElementById("tj-dots");
+  EPS.forEach((e,i) => {
+    const [x,y] = xy(i);
+    const c = document.createElementNS("http://www.w3.org/2000/svg","circle");
+    c.setAttribute("cx",x); c.setAttribute("cy",y); c.setAttribute("r",7);
+    c.setAttribute("fill", dom(i)); c.dataset.i = i; c.style.display = "none";
+    c.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation();
+      openDome(i); });
+    dots.appendChild(c);
+  });
+
+  // ---- ambient clock: one episode per 30s, ticker steps through real steps
+  let cur = 0, stepIdx = 0, stepTimer = null;
+  const EP_MS = 30000;
+  function reveal(n) {
+    [...dots.children].forEach((c,i) => {
+      c.style.display = i <= n ? "" : "none";
+      c.classList.toggle("cur", i === n);
+    });
+    document.getElementById("tj-line").setAttribute("points",
+      EPS.slice(0, n+1).map((_,i) => xy(i).join(",")).join(" "));
+    const u = EPS[n].units;
+    document.getElementById("case-foot").textContent =
+      `${C.meta.kind} · ep ${EPS[n].ep}/${N} · memory ${u.memory} · skills ${u.skills}` +
+      ` · tools ${u.tools} · ${C.meta.arm}`;
+  }
+  function tickStep() {
+    const steps = EPS[cur].steps;
+    if (!steps.length) return;
+    const [ph, tool, tgt] = steps[stepIdx % steps.length];
+    document.getElementById("tick-line").textContent =
+      `live · ${ph} · ${tool}${tgt ? " → " + tgt : ""}`;
+    stepIdx++;
+  }
+  function startEpisode(i) {
+    cur = i; stepIdx = 0; reveal(i);
+    clearInterval(stepTimer);
+    const steps = Math.max(EPS[i].steps.length, 1);
+    stepTimer = setInterval(tickStep, Math.max(EP_MS/steps, 350));
+    tickStep();
+  }
+  startEpisode(0);
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
+    setInterval(() => startEpisode((cur+1) % N), EP_MS);
+
+  // ---- the dome
+  const ov = document.getElementById("dome-overlay");
+  let domeEp = 0, feedTimer = null;
+  function openDome(i) {
+    domeEp = i; ov.classList.add("on"); renderDome();
+  }
+  function closeDome() { ov.classList.remove("on"); clearInterval(feedTimer); }
+  function renderDome() {
+    const e = EPS[domeEp];
+    document.getElementById("dome-title").textContent =
+      `episode ${e.ep} of ${N} · ${C.meta.kind}`;
+    const m = C.meta;
+    document.getElementById("dome-setup").innerHTML = [
+      ["harness", m.harness], ["model", m.model], ["arm", m.arm],
+      ["goal", m.goal], ["sandbox", m.sandbox], ["note", m.disclosure],
+    ].map(([k,v]) => `<span class="micro">${k}</span>${v}`).join("");
+    const counts = {};
+    e.steps.forEach(s => counts[s[1]] = (counts[s[1]]||0) + 1);
+    const top = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0,5);
+    const mx = top.length ? top[0][1] : 1;
+    document.getElementById("dome-meas").innerHTML = `
+      <span class="micro">state after</span>
+      memory ${e.units.memory} · skills ${e.units.skills} · tools ${e.units.tools}
+      <span class="micro">Δ this episode</span>
+      +${e.d.a} added · ${e.d.r} revised · ${e.d.d} dropped
+      <span class="micro">tool calls</span>${e.steps.length}
+      <span class="micro">top tools</span>` +
+      top.map(([t,n]) => `<div>${t} · ${n}
+        <div class="meas-bar" style="width:${Math.round(100*n/mx)}%"></div></div>`).join("");
+    // replay the feed
+    const feed = document.getElementById("dome-feed");
+    feed.innerHTML = "";
+    clearInterval(feedTimer);
+    let j = 0;
+    const ms = Math.max(120, Math.min(400, 12000 / e.steps.length));
+    feedTimer = setInterval(() => {
+      if (j >= e.steps.length) { clearInterval(feedTimer); return; }
+      const [ph, tool, tgt] = e.steps[j++];
+      document.getElementById("dome-phase").textContent = ph.toUpperCase();
+      const d = document.createElement("div");
+      d.className = "st" + (WRITE.test(tool) ? " w" : "");
+      d.innerHTML = `<span class="ph">${ph}</span>
+        <span class="tl">${tool}</span><span class="tg">${tgt || ""}</span>`;
+      feed.appendChild(d);
+      feed.scrollTop = feed.scrollHeight;
+      while (feed.children.length > 14) feed.removeChild(feed.firstChild);
+    }, ms);
+  }
+  document.getElementById("dome-close").onclick = e => { e.preventDefault(); closeDome(); };
+  document.getElementById("dome-prev").onclick = e => { e.preventDefault();
+    if (domeEp > 0) { domeEp--; renderDome(); } };
+  document.getElementById("dome-next").onclick = e => { e.preventDefault();
+    if (domeEp < N-1) { domeEp++; renderDome(); } };
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeDome(); });
+
+})();
+</script>
+<script>
+// stage front/back: the trace takes the foreground while its section is in view
+const traceSec = document.getElementById("trace-sec");
+new IntersectionObserver(es => {
+  es.forEach(e => document.body.classList.toggle("trace-front",
+    e.isIntersecting && e.intersectionRatio > .45));
+}, {threshold:[.45]}).observe(traceSec);
+</script>
 </body>
 </html>
