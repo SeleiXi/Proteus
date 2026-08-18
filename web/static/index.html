@@ -56,13 +56,23 @@ section.page > .wrap { width:100% }
 
 <div id="stage">
   <div class="micro" style="margin-bottom:14px"><span class="sp-dot"></span>
-    a real run, replaying · one episode every 30s · y = tool calls per episode ·
-    click empty space to zoom out</div>
+    a real run, replaying · y = tool calls per episode · click a dot for the episode ·
+    click empty space to zoom out · drag the bar to scrub</div>
   <svg id="traj" viewBox="0 0 1000 520" aria-label="evolution trajectory">
     <g id="tj-overlay"></g><g id="tj-world"></g></svg>
   <div id="stage-cap">
     <span class="micro" id="tick-line"></span>
     <span class="micro" id="case-foot"></span>
+  </div>
+  <div id="transport">
+    <a href="#" id="pp" class="micro tbtn">pause</a>
+    <span class="micro tsep">·</span>
+    <a href="#" class="micro tbtn spd" data-s="0.5">0.5×</a>
+    <a href="#" class="micro tbtn spd on" data-s="1">1×</a>
+    <a href="#" class="micro tbtn spd" data-s="2">2×</a>
+    <a href="#" class="micro tbtn spd" data-s="4">4×</a>
+    <div id="scrub"><i id="scrub-fill"></i><b id="scrub-knob"></b></div>
+    <span class="micro" id="scrub-lab"></span>
   </div>
 </div>
 
@@ -350,6 +360,18 @@ proteus measure --harness minimal --out runs/demo</pre>
 @keyframes breathe { 0%,100%{opacity:1} 50%{opacity:.18} }
 #tick-line { min-height:17px; color:var(--anchor-hi) }
 .sp-foot { margin-top:8px; color:var(--dim) }
+#transport { display:flex; align-items:center; gap:12px; margin-top:14px }
+.tbtn { color:var(--soft) } .tbtn:hover { color:var(--anchor); text-decoration:none }
+.tbtn.on { color:var(--anchor-hi) }
+.tsep { color:var(--dim) }
+#scrub { flex:1; height:14px; display:flex; align-items:center; cursor:pointer;
+  position:relative; min-width:160px; touch-action:none }
+#scrub::before { content:""; position:absolute; left:0; right:0; height:3px;
+  background:var(--rule) }
+#scrub-fill { position:absolute; left:0; height:3px; background:var(--anchor);
+  width:0 }
+#scrub-knob { position:absolute; width:9px; height:9px; border-radius:50%;
+  background:var(--anchor-hi); transform:translateX(-50%); left:0 }
 
 #dome-overlay { position:fixed; inset:0; background:var(--bg); z-index:50;
   display:flex; flex-direction:column; padding:18px 22px; overflow-y:auto;
@@ -475,11 +497,11 @@ proteus measure --harness minimal --out runs/demo</pre>
          font-family="SF Mono,ui-monospace,monospace">tool calls / episode</text>`;
   }
 
-  // ---- the broadcast clock: position is derived from wall time, so every visitor
-  // sees the same moment of the same loop, and a refresh lands mid-stream
+  // ---- the player: a virtual clock the user can pause, scale, and scrub
   const EP_MS = 30000, LINE_MS = 3800, DWELL = EP_MS - LINE_MS;
   const CYCLE = N * EP_MS;
-  const T0 = Date.UTC(2026, 0, 1);          // fixed epoch: the schedule is global
+  let vt = 14 * EP_MS;                       // enter at episode 15
+  let playing = true, speed = 1, lastNow = performance.now();
   const grow = document.getElementById("tj-grow");
   const lineEl = document.getElementById("tj-line");
   function syncLine(upto) {
@@ -502,9 +524,12 @@ proteus measure --harness minimal --out runs/demo</pre>
   let cur = 0;
   const ease = k => k < .5 ? 2*k*k : 1 - Math.pow(-2*k + 2, 2) / 2;
 
-  // ---- main loop: everything is a pure function of the broadcast clock
-  function frame() {
-    const t = (Date.now() - T0) % CYCLE;
+  // ---- main loop: everything is a pure function of the playhead
+  function frame(now) {
+    const dt = Math.min((now || performance.now()) - lastNow, 250);
+    lastNow = now || performance.now();
+    if (playing) vt = (vt + dt * speed) % CYCLE;
+    const t = vt;
     const ep = Math.floor(t / EP_MS);
     const intra = t - ep * EP_MS;
     if (ep !== lastEp) { setCur(ep); lastEp = ep; lastStep = -1; }
@@ -542,7 +567,38 @@ proteus measure --harness minimal --out runs/demo</pre>
     cam.y += (tgt.y - cam.y) * a;
     cam.s += (tgt.s - cam.s) * a;
     applyCam();
+    paintTransport(ep);
     requestAnimationFrame(frame);
+  }
+
+  // ---- transport: pause, speed, drag-to-scrub (the dome feed shares these)
+  const ppBtn = document.getElementById("pp");
+  ppBtn.addEventListener("click", e => { e.preventDefault(); e.stopPropagation();
+    playing = !playing; ppBtn.textContent = playing ? "pause" : "play"; });
+  document.querySelectorAll(".spd").forEach(b =>
+    b.addEventListener("click", e => { e.preventDefault(); e.stopPropagation();
+      speed = parseFloat(b.dataset.s);
+      document.querySelectorAll(".spd").forEach(x => x.classList.toggle("on", x === b));
+    }));
+  const scrub = document.getElementById("scrub");
+  let scrubbing = false;
+  function scrubTo(clientX) {
+    const r = scrub.getBoundingClientRect();
+    const f = Math.min(Math.max((clientX - r.left) / (r.width || 1), 0), 0.9999);
+    vt = f * CYCLE;
+  }
+  scrub.addEventListener("pointerdown", e => { e.stopPropagation();
+    scrubbing = true;
+    try { scrub.setPointerCapture(e.pointerId); } catch (err) {}
+    scrubTo(e.clientX); });
+  scrub.addEventListener("pointermove", e => { if (scrubbing) scrubTo(e.clientX); });
+  scrub.addEventListener("pointerup", () => scrubbing = false);
+  scrub.addEventListener("click", e => e.stopPropagation());
+  function paintTransport(ep) {
+    const f = vt / CYCLE;
+    document.getElementById("scrub-fill").style.width = (f * 100) + "%";
+    document.getElementById("scrub-knob").style.left = (f * 100) + "%";
+    document.getElementById("scrub-lab").textContent = `ep ${ep + 1}/${N}`;
   }
 
   // ---- interactions: dots open the dome; empty space toggles overview
@@ -627,19 +683,24 @@ proteus measure --harness minimal --out runs/demo</pre>
     const feed = document.getElementById("dome-feed");
     feed.innerHTML = "";
     clearInterval(feedTimer);
-    let j = 0;
+    let j = 0, acc = 0;
     const ms = Math.max(120, Math.min(400, 12000 / e.steps.length));
     feedTimer = setInterval(() => {
-      if (j >= e.steps.length) { clearInterval(feedTimer); return; }
-      const [ph, tool, tg] = e.steps[j++];
-      document.getElementById("dome-phase").textContent = ph.toUpperCase();
-      const d = document.createElement("div");
-      d.className = "st" + (WRITE.test(tool) ? " w" : "");
-      d.innerHTML = `<span class="ph">${ph}</span>
-        <span class="tl">${tool}</span><span class="tg">${tg || ""}</span>`;
-      feed.appendChild(d);
-      while (feed.children.length > 14) feed.removeChild(feed.firstChild);
-    }, ms);
+      if (!playing) return;              // the global transport pauses the dome too
+      acc += 50 * speed;                 // and scales with the global speed
+      while (acc >= ms && j < e.steps.length) {
+        acc -= ms;
+        const [ph, tool, tg] = e.steps[j++];
+        document.getElementById("dome-phase").textContent = ph.toUpperCase();
+        const d = document.createElement("div");
+        d.className = "st" + (WRITE.test(tool) ? " w" : "");
+        d.innerHTML = `<span class="ph">${ph}</span>
+          <span class="tl">${tool}</span><span class="tg">${tg || ""}</span>`;
+        feed.appendChild(d);
+        while (feed.children.length > 14) feed.removeChild(feed.firstChild);
+      }
+      if (j >= e.steps.length) clearInterval(feedTimer);
+    }, 50);
   }
   document.getElementById("dome-close").onclick = e => { e.preventDefault(); closeDome(); };
   document.getElementById("dome-prev").onclick = e => { e.preventDefault();
