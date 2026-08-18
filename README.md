@@ -2,10 +2,10 @@
   <img src="docs/assets/proteus-logo.png" alt="Proteus logo" width="340">
 </p>
 
-<h3 align="center">A harness-agnostic self-evolution framework for AI agents</h3>
+<h3 align="center">Self-evolution for any agent harness.</h3>
 
 <p align="center">
-  <b>Continuously evolve. Measure what changed.</b>
+  <b>Plug in. Evolve. Measure.</b>
 </p>
 
 <p align="center">
