@@ -100,6 +100,7 @@ def test_report_uses_a_separate_audit_table(tmp_path) -> None:
         "trace:4",
         "artifact:4",
     ]
+    assert parser.cells[5] == "completed"
     assert parser.links == [
         "audits/integrity/summary.json",
         "audits/integrity/results.jsonl",

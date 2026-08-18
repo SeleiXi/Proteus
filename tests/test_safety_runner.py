@@ -9,7 +9,7 @@ import pytest
 
 from proteus.adapters.minimal import MinimalHarness, mock_policy
 from proteus.core import NEUTRAL, GoalConfig, snapshot
-from proteus.core.adapter import HarnessAdapter, Surface
+from proteus.core.adapter import ActionEvent, HarnessAdapter, Surface
 from proteus.safety.model import (
     AuditAssessment,
     AuditContext,
@@ -68,6 +68,37 @@ class ThrowingCase:
 
 class EscapingCase(PassingCase):
     case_id = "../outside"
+
+
+class MissingTaxonomyCase:
+    case_id = "missing-taxonomy"
+    expected_behavior = ("case metadata is complete",)
+
+    def evaluate(self, context):
+        return AuditAssessment(status=AuditStatus.NOT_EVALUATED)
+
+
+class MissingExpectedBehaviorCase:
+    case_id = "missing-expected"
+    taxonomy = _taxonomy()
+
+    def evaluate(self, context):
+        return AuditAssessment(status=AuditStatus.NOT_EVALUATED)
+
+
+class MissingEvaluateCase:
+    case_id = "missing-evaluate"
+    taxonomy = _taxonomy()
+    expected_behavior = ("case metadata is complete",)
+
+
+class MalformedTraceAdapter(MinimalHarness):
+    def __init__(self, event: object) -> None:
+        super().__init__()
+        self.event = event
+
+    def read_trace(self, root: Path, episode: int):
+        return (self.event,)
 
 
 @dataclass
@@ -205,6 +236,19 @@ def test_incomplete_sweep_is_rejected_before_audit_directory(tmp_path: Path) -> 
     assert not (sweep / "audits").exists()
 
 
+def test_errored_sweep_diagnostic_includes_recorded_error(tmp_path: Path) -> None:
+    sweep, adapter, suite = _completed_sweep(tmp_path, episodes=1)
+    records_path = sweep / "seeds.jsonl"
+    record = json.loads(records_path.read_text().splitlines()[0])
+    record["error"] = "model failed"
+    records_path.write_text(json.dumps(record) + "\n")
+
+    with pytest.raises(ValueError, match="model failed"):
+        run_audit(sweep, adapter, suite, audit_id="errored")
+
+    assert not (sweep / "audits").exists()
+
+
 @pytest.mark.parametrize("audit_id", ["../escape", "has/slash", ""])
 def test_invalid_explicit_audit_id_is_rejected(tmp_path: Path, audit_id: str) -> None:
     sweep, adapter, suite = _completed_sweep(tmp_path, episodes=1)
@@ -255,3 +299,48 @@ def test_materialization_failure_preserves_captured_stderr(
     row = _read_jsonl(result.results_path)[0]
     assert row["status"] == "invalid"
     assert "archive corrupt" in row["observed_behavior"][0]
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        object(),
+        ActionEvent(turn=1, phase=1, text=""),
+        ActionEvent(turn=1, phase="reflect", text=None),
+    ],
+)
+def test_malformed_trace_event_becomes_invalid_result(
+    tmp_path: Path, event: object
+) -> None:
+    sweep, _, suite = _completed_sweep(tmp_path, episodes=1)
+
+    result = run_audit(
+        sweep,
+        MalformedTraceAdapter(event),
+        suite,
+        audit_id="malformed-trace",
+    )
+
+    row = _read_jsonl(result.results_path)[0]
+    assert row["status"] == "invalid"
+    assert "malformed trace event" in row["observed_behavior"][0]
+
+
+@pytest.mark.parametrize(
+    ("case", "field"),
+    [
+        (MissingTaxonomyCase(), "taxonomy"),
+        (MissingExpectedBehaviorCase(), "expected_behavior"),
+        (MissingEvaluateCase(), "evaluate"),
+    ],
+)
+def test_malformed_suite_case_is_rejected_before_output(
+    tmp_path: Path, case: object, field: str
+) -> None:
+    sweep, adapter, _ = _completed_sweep(tmp_path, episodes=1)
+    suite = FixtureSuite(selected_cases=(case,))
+
+    with pytest.raises(TypeError, match=field):
+        run_audit(sweep, adapter, suite, audit_id="bad-case-metadata")
+
+    assert not (sweep / "audits").exists()

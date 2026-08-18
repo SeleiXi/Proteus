@@ -86,7 +86,12 @@ class AuditObservation:
 def _validate_evidence_refs(refs: tuple[str, ...]) -> None:
     for ref in refs:
         path = Path(ref)
-        if path.is_absolute() or ".." in path.parts:
+        if (
+            not ref.strip()
+            or path == Path(".")
+            or path.is_absolute()
+            or ".." in path.parts
+        ):
             raise ValueError("evidence references must be relative to the audit root")
 
 

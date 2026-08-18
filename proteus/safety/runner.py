@@ -23,6 +23,7 @@ from proteus.safety.model import (
     AuditResult,
     AuditStatus,
     AuditSuite,
+    AuditTaxonomy,
     Exposure,
     build_result,
 )
@@ -112,10 +113,12 @@ def _validate_completed_sweep(
             raise ValueError(f"completed seed record is not planned: {key}")
         if key in completed:
             raise ValueError(f"sweep has duplicate completed seed record: {key}")
-        if episodes != target_episodes or record.get("error"):
+        recorded_error = record.get("error")
+        if episodes != target_episodes or recorded_error:
+            error_detail = f"; error: {recorded_error}" if recorded_error else ""
             raise ValueError(
                 "sweep is incomplete: "
-                f"{key} completed {episodes}/{target_episodes} episodes"
+                f"{key} completed {episodes}/{target_episodes} episodes{error_detail}"
             )
         completed.add(key)
     missing = set(planned) - completed
@@ -129,6 +132,45 @@ def _extract_self_assessments(events: Sequence[ActionEvent]) -> tuple[str, ...]:
         for event in events
         if event.phase == "reflect" and event.text.strip()
     )
+
+
+def _validate_events(events: Sequence[object]) -> None:
+    for index, event in enumerate(events):
+        if not isinstance(event, ActionEvent):
+            raise TypeError(
+                f"malformed trace event {index}: expected ActionEvent, "
+                f"got {type(event).__name__}"
+            )
+        valid = (
+            isinstance(event.turn, int)
+            and isinstance(event.phase, str)
+            and (event.tool is None or isinstance(event.tool, str))
+            and (event.surface is None or isinstance(event.surface, str))
+            and isinstance(event.params, Mapping)
+            and isinstance(event.text, str)
+        )
+        if not valid:
+            raise TypeError(f"malformed trace event {index}: invalid field types")
+
+
+def _validate_cases(cases: Sequence[object]) -> None:
+    case_ids: list[str] = []
+    for case in cases:
+        case_id = _validate_component(getattr(case, "case_id", None), "case ID")
+        case_ids.append(case_id)
+        if not isinstance(getattr(case, "taxonomy", None), AuditTaxonomy):
+            raise TypeError(f"audit case {case_id} needs valid taxonomy")
+        expected = getattr(case, "expected_behavior", None)
+        if not (
+            isinstance(expected, tuple)
+            and expected
+            and all(isinstance(item, str) and item.strip() for item in expected)
+        ):
+            raise TypeError(f"audit case {case_id} needs valid expected_behavior")
+        if not callable(getattr(case, "evaluate", None)):
+            raise TypeError(f"audit case {case_id} needs callable evaluate")
+    if len(case_ids) != len(set(case_ids)):
+        raise ValueError("audit suite has duplicate case ID")
 
 
 def _exception_detail(exc: BaseException) -> str:
@@ -248,9 +290,7 @@ def run_audit(
     cases = tuple(suite.cases(adapter, surfaces))
     if not cases:
         raise ValueError("audit suite has no cases")
-    case_ids = [_validate_component(case.case_id, "case ID") for case in cases]
-    if len(case_ids) != len(set(case_ids)):
-        raise ValueError("audit suite has duplicate case ID")
+    _validate_cases(cases)
 
     audit_id = _validate_audit_id(audit_id or suite.name)
     audits_root = sweep_root / "audits"
@@ -334,6 +374,8 @@ def run_audit(
 
                     try:
                         events = tuple(adapter.read_trace(run_root, episode))
+                        _validate_events(events)
+                        self_assessments = _extract_self_assessments(events)
                     except Exception as exc:  # noqa: BLE001 - adapter input becomes evidence
                         reason = f"trace parsing failed: {_exception_detail(exc)}"
                         for case in cases:
@@ -351,7 +393,6 @@ def run_audit(
                             _append_result(sink, result)
                         continue
 
-                    self_assessments = _extract_self_assessments(events)
                     for case in cases:
                         evidence_dir = (
                             audit_root

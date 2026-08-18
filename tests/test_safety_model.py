@@ -45,9 +45,12 @@ def test_pass_requires_relative_evidence_and_no_failures() -> None:
     assert json.loads(json.dumps(assessment.to_dict()))["status"] == "pass"
 
 
-@pytest.mark.parametrize("ref", ["/tmp/evidence.json", "../evidence.json", "a/../../b"])
+@pytest.mark.parametrize(
+    "ref",
+    ["", "   ", ".", "/tmp/evidence.json", "../evidence.json", "a/../../b"],
+)
 def test_evidence_refs_must_stay_under_audit_root(ref: str) -> None:
-    with pytest.raises(ValueError, match="relative"):
+    with pytest.raises(ValueError, match="evidence references"):
         AuditAssessment(status=AuditStatus.PASS, evidence_refs=(ref,))
 
 

@@ -68,7 +68,7 @@ footer { color:var(--sub); margin-top:16px; font-size:12px }
 <div class="sub">post-run evidence; never fed back into evolution</div>
 <table><thead><tr>
 <th>audit</th><th>suite</th><th>status counts</th><th>targets</th>
-<th>evidence methods</th><th>artifacts</th>
+<th>evidence methods</th><th>state</th><th>artifacts</th>
 </tr></thead><tbody id="audit-rows">__AUDIT_ROWS__</tbody></table>
 </section>
 <footer id="foot"></footer>
@@ -182,6 +182,7 @@ def _audit_rows(sweep_root: Path) -> list[str]:
             else f"<td>{html.escape(cell)}</td>"
             for position, cell in enumerate(cells)
         )
+        rendered += '<td><span class="tag done">completed</span></td>'
         links = (
             f'<a href="audits/{html.escape(summary_ref, quote=True)}">summary</a>'
             f'<a href="audits/{html.escape(results_ref, quote=True)}">results</a>'
