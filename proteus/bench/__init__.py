@@ -18,3 +18,6 @@ __all__ = [
     "task_root",
     "workspace_diff",
 ]
+
+from proteus.bench.polyglot import list_tasks, polyglot_task  # noqa: E402,F401
+__all__ += ["list_tasks", "polyglot_task"]

@@ -1,0 +1,74 @@
+# Bringing a benchmark
+
+A benchmark in Proteus is a **goal with a grader**: the agent is told what to pursue, and
+between episodes the grader scores what is actually in the workspace. The whole contract
+is one `BenchTask` — three things:
+
+```python
+BenchTask(
+    id="yourbench:task-17",
+    goal_text="What the agent is told to pursue.",
+    setup=lambda ws: ...,   # write the task into the agent's task/ workspace, once
+    grade=lambda ws: ...,   # -> EvalResult(score in [0,1], passed, detail), every episode
+)
+```
+
+Everything else — seeding into the harness, per-evaluator visibility, selection, progress
+records, the tracking page — is the framework's job and works the same for every
+benchmark. Wire it into a run with:
+
+```python
+from proteus.bench import as_goal
+task = ...
+cfg = RunConfig(..., goal=as_goal(task, visibility=Visibility.OBSERVE), task=task)
+```
+
+## The three tiers
+
+| tier | module | needs | use it for |
+|---|---|---|---|
+| built-in | `proteus.bench.local` | nothing | smoke tests, plumbing, CI |
+| **lightweight external** | `proteus.bench.polyglot` | Python + one shallow clone | real ablations at negligible cost |
+| heavyweight official | `proteus.bench.swe` | Docker, ~120 GB, x86_64 | headline numbers on the real thing |
+
+**Start from `polyglot.py`** — it is deliberately the worked example. ~180 lines, no
+dependencies, and it demonstrates every property a contributed benchmark must have.
+`tests/test_polyglot.py` fabricates a miniature dataset in the benchmark's exact layout,
+so it also documents the shape your loader must read, and your tests never touch the
+network.
+
+## What a contributed benchmark must get right
+
+Each of these exists because an agent found the exploit or a run hit the failure:
+
+1. **The seeded task must start failing.** A task whose stub already passes is a dead
+   reward signal (`test_lists_and_seeds_a_failing_exercise`).
+2. **Tests are held out.** `grade` rewrites the test files from the dataset before running
+   them. Agents edit tests when that raises the score — ours did
+   (`test_editing_the_tests_gains_nothing`).
+3. **Grading is cwd-independent.** Resolve every path beside the driver file, never
+   against the working directory: the same grader must work on the host (cwd = workspace)
+   and inside a container (cwd = whatever the image says, usually `/`).
+4. **No nested git in the workspace.** A `.git` inside `harness/task/` becomes a gitlink
+   in the run's snapshot repo: task work stops being captured, and a rejected episode
+   leaks its task edits into the next one.
+5. **Grading runs agent-authored code — treat it that way.** The grader executes whatever
+   the agent left in the workspace. Run it under the same isolation as the episode, or
+   only against harnesses you trust.
+6. **Heavy dependencies are imported lazily and fail legibly.** The framework must run
+   without your benchmark's SDK installed; a missing dependency is a scored zero with an
+   install hint, not an ImportError at import time (`swe.py` shows the pattern).
+7. **Dense scores over binary ones where the benchmark allows.** An evolution study reads
+   direction; `7/31 tests` says more than `failed`. Report the official binary verdict
+   through `passed` and the dense fraction through `score`.
+8. **Attribute the dataset.** Name the source and its license in the module docstring
+   (polyglot: © Exercism, per the benchmark repo's README).
+
+## Checklist for a PR
+
+- [ ] `BenchTask` factory (`yourbench_task(id, ...)`) + `list_tasks()` for discovery
+- [ ] offline tests against a fabricated miniature dataset in the real layout
+- [ ] a real-dataset spot check documented in the PR description (stub fails, reference
+      solution passes)
+- [ ] the eight properties above, each visible in the code or the tests
+- [ ] module docstring says which tier it is and what it costs to run

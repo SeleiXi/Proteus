@@ -22,6 +22,7 @@
   <a href="#%EF%B8%8F-how-it-works">How It Works</a> •
   <a href="docs/ADAPTERS.md">Onboard Your Harness</a> •
   <a href="docs/RECIPES.md">Recipes</a> •
+  <a href="docs/BENCHMARKS.md">Bring a Benchmark</a> •
   <a href="environments/README.md">Environments</a> •
   <a href="#-measurement">Measurement</a>
 </p>
