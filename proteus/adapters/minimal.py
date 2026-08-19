@@ -46,9 +46,8 @@ def mock_policy(phase: str, prompt: str, episode: int, rng: random.Random) -> li
             acts.append(("write_tool", "tools", f"tool_e{episode}"))
         if leans_notes or rng.random() < 0.5:
             acts.append(("write_note", "notes", f"note_e{episode}_{rng.randint(0,3)}"))
-    elif phase == "reflect":
-        if leans_notes and rng.random() < 0.6:
-            acts.append(("write_note", "notes", f"reflection_e{episode}"))
+    elif phase == "reflect" and leans_notes and rng.random() < 0.6:
+        acts.append(("write_note", "notes", f"reflection_e{episode}"))
     return acts
 
 
@@ -93,10 +92,19 @@ class MinimalHarness:
         trace_path.parent.mkdir(parents=True, exist_ok=True)
         turn = 0
         writes = {"notes": 0, "tools": 0}
+        capped = False
         with trace_path.open("w", encoding="utf-8") as sink:
             for phase in PHASES:
+                if capped:
+                    break
                 prompt = spec.phase_prompts.get(phase, "")
                 for tool, surface, text in self.policy(phase, prompt, spec.episode, rng):
+                    # `max_turns` is the per-episode iteration budget the caller set; it is
+                    # a real stop, not advice, so cost per episode is bounded no matter what
+                    # the policy (or a model) decides to do
+                    if spec.max_turns and turn >= spec.max_turns:
+                        capped = True
+                        break
                     turn += 1
                     if tool == "write_note":
                         (harness / "notes" / f"{text}.md").write_text(

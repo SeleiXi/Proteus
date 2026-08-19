@@ -50,6 +50,50 @@ def _adapter_factory(name: str):
                      "(built-in: minimal, llm, dsh, pi, aki; or use <module>:<Class>)")
 
 
+def _sandbox_factory(args):
+    """A callable returning a fresh sandbox per run, or None to leave the adapter's default.
+
+    `--env` is what the user brings: an image reference, or a directory / TOML manifest
+    describing one. The individual flags override whatever the manifest said.
+    """
+    if not (args.env or args.network or args.mem or args.cpus or args.docker_arg):
+        return None
+    from proteus.sandbox import DockerSandbox, SandboxConfig
+    overrides = {"network": args.network, "mem_limit": args.mem, "cpus": args.cpus,
+                 "extra_args": tuple(args.docker_arg or ())}
+    try:
+        cfg = (SandboxConfig.from_spec(args.env, **overrides) if args.env
+               else SandboxConfig(**{k: v for k, v in overrides.items() if v}))
+    except (OSError, KeyError, ValueError) as exc:
+        raise SystemExit(f"bad --env {args.env!r}: {exc}") from None
+    return lambda: DockerSandbox(cfg)
+
+
+def _harness_factory(args):
+    """The adapter factory the sweep calls per run, with the user's environment and
+    per-episode caps applied to whichever adapter accepts them."""
+    import inspect
+    cls = _adapter_factory(args.harness)
+    sandbox = _sandbox_factory(args)
+    params = set(inspect.signature(cls).parameters)
+    kw = {}
+    if sandbox is not None and "sandbox" in params:
+        kw["sandbox"] = None      # filled per call below
+    if args.phase_timeout and "phase_timeout_s" in params:
+        kw["phase_timeout_s"] = args.phase_timeout
+    if sandbox is not None and "sandbox" not in params:
+        raise SystemExit(
+            f"harness {args.harness!r} does not take a sandbox, so --env/--network/--mem/"
+            "--cpus/--docker-arg cannot apply to it (containerised built-ins: dsh, pi)")
+
+    def make():
+        call = dict(kw)
+        if sandbox is not None:
+            call["sandbox"] = sandbox()
+        return cls(**call)
+    return make
+
+
 def _arm(spec: str):
     if spec == "neutral":
         return NEUTRAL
@@ -73,7 +117,7 @@ def _goal(spec: str) -> GoalConfig:
 def cmd_run(args) -> int:
     cfg = SweepConfig(
         name=args.out,
-        adapter_factory=_adapter_factory(args.harness),
+        adapter_factory=_harness_factory(args),
         arms=[_arm(a) for a in args.arm],
         seeds=args.seeds,
         goal=_goal(args.goal),
@@ -81,8 +125,12 @@ def cmd_run(args) -> int:
         model=args.model,
         episodes=args.episodes,
         max_turns=args.max_turns,
+        on_existing=args.on_existing,
     )
-    records = run_sweep(cfg)
+    try:
+        records = run_sweep(cfg)
+    except FileExistsError as exc:
+        raise SystemExit(str(exc)) from None
     done = sum(r["episodes_complete"] for r in records)
     print(f"ran {len(records)} seeds, {done} episodes -> {args.out}")
     return 0
@@ -91,12 +139,13 @@ def cmd_run(args) -> int:
 def _travel(run_root: Path, episodes: int, surfaces) -> dict:
     """Materialise every episode state from the snapshot chain and sum path length."""
     import tempfile
+
     from proteus.core import snapshot
     from proteus.measure import distance
     work = run_root / "harness"
     states = []
     with tempfile.TemporaryDirectory() as tmp:
-        for ep in range(0, episodes + 1):
+        for ep in range(episodes + 1):
             sha = snapshot.commit_for_episode(work, ep)
             if sha is None:
                 continue
@@ -109,6 +158,7 @@ def _travel(run_root: Path, episodes: int, surfaces) -> dict:
 def cmd_measure(args) -> int:
     import statistics as st
     from collections import defaultdict
+
     from proteus.measure import distance, stream
     root = Path(args.out).expanduser()
     adapter = _adapter_factory(args.harness)()
@@ -214,6 +264,23 @@ def main(argv=None) -> int:
     r.add_argument("--seeds", type=int, default=4)
     r.add_argument("--episodes", type=int, default=10)
     r.add_argument("--max-turns", type=int, default=100)
+    r.add_argument("--phase-timeout", type=int, default=0, metavar="S",
+                   help="wall-clock limit per phase for containerised harnesses "
+                        "(default: the adapter's own, 600s)")
+    r.add_argument("--env", default="", metavar="SPEC",
+                   help="the container to evolve in: an image reference, or a directory / "
+                        "environment.toml describing one")
+    r.add_argument("--network", default="", choices=("", "none", "host", "bridge"),
+                   help="container network (default: the environment's, else none)")
+    r.add_argument("--mem", default="", metavar="LIMIT", help="container memory, e.g. 4g")
+    r.add_argument("--cpus", default="", metavar="N", help="container cpu limit, e.g. 2")
+    r.add_argument("--docker-arg", action="append", metavar="FLAG",
+                   help="extra `docker run` flag, repeatable (e.g. --docker-arg --gpus "
+                        "--docker-arg all)")
+    r.add_argument("--on-existing", choices=("refuse", "resume", "overwrite"),
+                   default="refuse",
+                   help="what to do when --out already holds runs: refuse (default), "
+                        "resume unfinished seeds, or overwrite them")
     r.add_argument("--model", default="",
                    help="model name; empty uses the adapter's default")
     r.add_argument("--out", required=True)

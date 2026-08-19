@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 from proteus.adapters.minimal import MinimalHarness, mock_policy
-from proteus.core import GoalConfig, Goal, NEUTRAL, Visibility, snapshot
+from proteus.core import NEUTRAL, Goal, GoalConfig, Visibility, snapshot
 from proteus.core.episode import RunConfig, run
 from proteus.core.evaluators import surface_units, tool_calls
 from proteus.core.goal import EvalResult

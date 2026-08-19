@@ -149,7 +149,8 @@ def _grade(ws: Path, key: str) -> EvalResult:
     (ws / "_grade.py").write_text(_DRIVER, encoding="utf-8")
     try:
         proc = subprocess.run([sys.executable, "_grade.py"], cwd=str(ws),
-                              capture_output=True, text=True, timeout=GRADE_TIMEOUT_S)
+                              capture_output=True, text=True, timeout=GRADE_TIMEOUT_S,
+                              check=False)
     except subprocess.TimeoutExpired:
         return EvalResult(name=key, score=0.0, passed=False,
                           detail=f"grading timed out after {GRADE_TIMEOUT_S}s")

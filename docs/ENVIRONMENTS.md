@@ -55,3 +55,70 @@ This note records what we adopted, what we deliberately do differently, and why.
 - Harbor's agent abstraction installs the agent *into* the task container at trial time.
   Proteus bakes the harness into the environment image at build time (pinned), because
   the harness is the constant apparatus and the workspace is the variable.
+
+## Bringing your own environment
+
+Nothing about the container is fixed. Point `--env` at an image reference, or at a
+directory / `environment.toml` describing one, and the containerised harnesses evolve
+inside it:
+
+```bash
+proteus run --harness dsh --env ghcr.io/you/your-env:1.4 --network host \
+    --arm neutral --seeds 2 --episodes 10 --out runs/mine
+```
+
+A manifest is the same thing, versioned, with the settings attached:
+
+```toml
+[environment]
+docker_image = "ghcr.io/you/your-env:1.4"   # or `image` for a tag you build locally
+network      = "host"                        # none (default) | host | bridge | a named network
+memory       = "8g"
+cpus         = "4"
+workdir      = "/workspace"
+user         = "1000:1000"                   # avoid root-owned files in the mounts
+env_passthrough = ["DEEPSEEK_API_KEY"]       # forwarded from your shell — secrets go here
+docker_args  = ["--gpus", "all"]             # anything the fields above do not name
+
+[[environment.mounts]]                       # extra bind mounts, repeatable
+host      = "/data/corpora"
+container = "/corpora"
+
+[environment.env]                            # literal values, visible in the process table
+LANG = "C.UTF-8"
+```
+
+```bash
+proteus run --harness pi --env ./my-env --out runs/mine ...
+```
+
+Command-line flags (`--network`, `--mem`, `--cpus`, `--docker-arg`) override the manifest,
+so one manifest can serve several runs. In Python the same object is passed directly, which
+is also how a custom adapter accepts one:
+
+```python
+from proteus.sandbox import DockerSandbox, SandboxConfig
+from proteus.adapters.dsh import DshHarness
+
+env = SandboxConfig.from_spec("./my-env", network="host")
+harness = DshHarness(sandbox=DockerSandbox(env), phase_timeout_s=1200)
+```
+
+Two requirements the image must meet: the harness binary is on the `PATH` (the adapter
+appends its own arguments to whatever the image's entrypoint is), and the mount points the
+adapter uses exist — `/workspace` for the evolving harness and `/state` for the harness's
+own session storage, for both `dsh` and `pi`. Everything else is yours.
+
+## Bounding an episode
+
+Two independent limits, both per episode and both yours to set:
+
+- `--max-turns` is the iteration budget: the number of steps an episode may take before it
+  stops, enforced by the adapter rather than suggested to the model. The `minimal` and
+  `llm` harnesses stop mid-phase when they reach it and record `turn_capped`.
+- `--phase-timeout` is wall-clock seconds per phase for containerised harnesses, where the
+  external CLI owns its own loop and a turn count is not ours to enforce. Reaching it ends
+  the episode with a timeout error rather than hanging the sweep. Default 600.
+
+Episode cost grows with episode index — later episodes wake up to a larger harness and read
+more of it — so a cap that is comfortable at episode 1 is the one that matters at episode 30.

@@ -3,9 +3,8 @@
 from pathlib import Path
 
 from proteus.adapters.minimal import MinimalHarness
-from proteus.core import NEUTRAL, GoalConfig, review
+from proteus.core import NEUTRAL, GoalConfig, review, snapshot
 from proteus.core.episode import BASE_PROMPTS, PHASES, RunConfig, run
-from proteus.core import snapshot
 from proteus.measure import distance, stream
 
 

@@ -42,10 +42,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from proteus.core.disposition import NEUTRAL, Disposition, record, review  # noqa: E402
-from proteus.core.goal import Goal, GoalConfig, Visibility  # noqa: E402
-from proteus.core import evaluators  # noqa: E402
-from proteus.sweep import SweepConfig, run_sweep  # noqa: E402
+from proteus.core import evaluators
+from proteus.core.disposition import NEUTRAL, Disposition, record, review
+from proteus.core.goal import Goal, GoalConfig, Visibility
+from proteus.sweep import SweepConfig, run_sweep
 
 STATIC = Path(__file__).parent / "static"
 

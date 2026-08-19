@@ -24,9 +24,9 @@ import os
 import urllib.request
 from pathlib import Path
 
+from proteus.adapters.minimal import MinimalHarness
 from proteus.core.adapter import EpisodeResult, EpisodeSpec
 from proteus.core.episode import PHASES
-from proteus.adapters.minimal import MinimalHarness
 
 SYSTEM = """\
 You are an agent that maintains and improves its own harness — the set of files it wakes
@@ -116,8 +116,14 @@ class LLMHarness(MinimalHarness):
         turn = 0
         writes = {"notes": 0, "tools": 0}
         error = ""
+        capped = False
         with trace_path.open("w", encoding="utf-8") as sink:
             for phase in PHASES:
+                # `max_turns` bounds the whole episode, model calls included: without it a
+                # verbose model sets the cost per episode, not the caller
+                if capped or (spec.max_turns and turn >= spec.max_turns):
+                    capped = True
+                    break
                 prompt = spec.phase_prompts.get(phase, "")
                 user = (f"Episode {spec.episode}, phase: {phase}.\n\n"
                         f"{prompt}\n\nCurrent harness state:\n{_render_state(harness)}")
@@ -132,6 +138,9 @@ class LLMHarness(MinimalHarness):
                 sink.write(json.dumps({"turn": turn, "phase": phase, "tool": None,
                                        "surface": None, "text": reply[:500]}) + "\n")
                 for act in _parse_actions(reply):
+                    if spec.max_turns and turn >= spec.max_turns:
+                        capped = True
+                        break
                     tool = act.get("tool", "")
                     name = "".join(c for c in str(act.get("name", "unnamed"))
                                    if c.isalnum() or c in "-_")[:60] or "unnamed"
@@ -150,4 +159,4 @@ class LLMHarness(MinimalHarness):
                     sink.write(json.dumps({"turn": turn, "phase": phase, "tool": tool,
                                            "surface": surface, "text": name}) + "\n")
         return EpisodeResult(episode=spec.episode, ok=not error, turns=turn, error=error,
-                             counters={"writes": writes})
+                             counters={"writes": writes, "turn_capped": capped})

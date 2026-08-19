@@ -9,7 +9,8 @@ Aki, or any plugged-in adapter, under no-goal or goal.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -30,6 +31,17 @@ class SweepConfig:
     model: str = "mock"
     episodes: int = 30
     max_turns: int = 100
+    on_existing: str = "refuse"
+    """What to do when a run root is already there: "refuse" (default), "resume", or
+    "overwrite".
+
+    Run ids are deterministic in (arm, seed), so a second sweep into the same root lands
+    on the same directories. Left alone, that silently continues each seed from the
+    previous sweep's *evolved* harness rather than from a clean seed, appends a second
+    record per seed, and writes a second "episode 1" into the same snapshot history —
+    contamination that is invisible in the output. "resume" skips seeds already recorded
+    complete and restarts any partial one from its seeded state; "overwrite" discards the
+    old run roots."""
 
 
 def opaque_id(arm: str, seed: int) -> str:
@@ -38,8 +50,27 @@ def opaque_id(arm: str, seed: int) -> str:
     return "run-" + hashlib.sha1(f"{arm}:{seed}".encode()).hexdigest()[:12]
 
 
+def completed_seeds(root: Path, episodes: int) -> set[tuple[str, int]]:
+    """(arm, seed) pairs recorded as having finished all `episodes`, from seeds.jsonl."""
+    done: set[tuple[str, int]] = set()
+    path = root / "seeds.jsonl"
+    if not path.exists():
+        return done
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if row.get("episodes_complete", 0) >= episodes and not row.get("error"):
+            done.add((row["arm"], row["seed"]))
+    return done
+
+
 def run_sweep(cfg: SweepConfig) -> list[dict]:
+    if cfg.on_existing not in ("refuse", "resume", "overwrite"):
+        raise ValueError(f"on_existing must be refuse/resume/overwrite, got {cfg.on_existing!r}")
     cfg.root.mkdir(parents=True, exist_ok=True)
+    done = completed_seeds(cfg.root, cfg.episodes) if cfg.on_existing == "resume" else set()
 
     # manifest first: the live report discovers every planned run from it, so tracking
     # works from episode 1 — not only after a seed completes
@@ -57,6 +88,18 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
             for s in range(cfg.seeds):
                 rid = opaque_id(arm.label, s)
                 run_root = cfg.root / "runs" / rid
+                if run_root.exists():
+                    if cfg.on_existing == "refuse":
+                        raise FileExistsError(
+                            f"{run_root} already holds a run of arm {arm.label!r} seed {s}. "
+                            "Sweeping into it again would continue that seed's evolved "
+                            "harness instead of starting clean. Use a fresh --out, or "
+                            "on_existing='resume' / 'overwrite'.")
+                    if (arm.label, s) in done:
+                        continue
+                    # partial (or errored) seed: no mid-seed resume exists, so start it
+                    # over from the seeded state rather than from half-evolved files
+                    shutil.rmtree(run_root)
                 rc = RunConfig(
                     name=arm.label, adapter=cfg.adapter_factory(), disposition=arm,
                     goal=cfg.goal, root=run_root, model=cfg.model,

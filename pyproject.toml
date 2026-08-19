@@ -26,3 +26,11 @@ include = ["proteus*"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
+# The package targets 3.10+, but `tests/run_offline.py` — the no-pytest path — has to
+# import the modules it exercises under whatever `python3` is on the machine, which on a
+# stock macOS is 3.9. The pyupgrade rules that rewrite `Optional[str]` to `str | None`
+# and `typing.Sequence` to `collections.abc` would break that, so they stay off; every
+# other default rule is enforced in CI.
+ignore = ["UP006", "UP035", "UP037", "UP045", "RUF007"]  # RUF007: itertools.pairwise is 3.10+, same reason

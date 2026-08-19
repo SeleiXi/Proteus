@@ -14,22 +14,37 @@ endpoint needs egress).
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Mapping, Protocol
 
 
 @dataclass(frozen=True)
 class SandboxConfig:
-    """User-tunable sandbox setup."""
+    """User-tunable sandbox setup.
 
-    network: str = "none"                 # "none" | "host" | "bridge"
+    Everything about the container is a variable, so evolving inside your own environment
+    is a config change and not a fork: bring an image (any registry ref or local tag),
+    declare what it needs (network, memory, cpus, mounts, env), and pass whatever else
+    your setup requires straight through to `docker run` via `extra_args`.
+    """
+
+    network: str = "none"                 # "none" | "host" | "bridge" | a named network
     image: str = "proteus-episode:latest"
     mem_limit: str = ""                   # e.g. "4g"; "" = unlimited
     cpus: str = ""                        # e.g. "2"; "" = unlimited
     extra_mounts: tuple[tuple[str, str], ...] = ()   # (host_path, container_path) read-write
     env_passthrough: tuple[str, ...] = ()            # env var names to forward (e.g. API keys)
+    env: Mapping[str, str] = field(default_factory=dict)
+    """Literal values set in the container (config the image needs, not secrets — these
+    land in the process table; put credentials in `env_passthrough` instead)."""
     entrypoint: tuple[str, ...] = ()      # override; adapter usually supplies the command
+    workdir: str = ""                     # container working directory
+    user: str = ""                        # e.g. "1000:1000" to avoid root-owned artefacts
+    extra_args: tuple[str, ...] = ()
+    """Verbatim `docker run` flags, inserted before the image — the escape hatch for
+    anything this dataclass does not name (`--gpus all`, `--platform`, `--shm-size`, an
+    extra `--volume`, a `--security-opt`)."""
 
     @classmethod
     def from_manifest(cls, path: Path) -> "SandboxConfig":
@@ -41,16 +56,45 @@ class SandboxConfig:
         """
         try:
             import tomllib
-        except ImportError:  # Python 3.10
-            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:  # Python < 3.11
+            try:
+                import tomli as tomllib  # type: ignore[no-redef]
+            except ImportError as exc:
+                raise RuntimeError(
+                    "reading an environment manifest needs Python 3.11+ or "
+                    "`pip install tomli`; or pass the image reference directly"
+                ) from exc
         env = tomllib.loads(Path(path).read_text(encoding="utf-8"))["environment"]
+        mounts = tuple((str(m["host"]), str(m["container"]))
+                       for m in env.get("mounts", ()) if m.get("host") and m.get("container"))
         return cls(
             network=env.get("network", "none"),
             image=env.get("docker_image") or env.get("image", "proteus-episode:latest"),
             mem_limit=str(env.get("memory", "")),
             cpus=str(env.get("cpus", "")) if env.get("cpus") else "",
+            extra_mounts=mounts,
             env_passthrough=tuple(env.get("env_passthrough", ())),
+            env={str(k): str(v) for k, v in (env.get("env") or {}).items()},
+            entrypoint=tuple(env.get("entrypoint", ())),
+            workdir=str(env.get("workdir", "")),
+            user=str(env.get("user", "")),
+            extra_args=tuple(str(a) for a in env.get("docker_args", ())),
         )
+
+    @classmethod
+    def from_spec(cls, spec: str, **overrides) -> "SandboxConfig":
+        """Resolve what a user typed into a config: a manifest, a directory, or an image.
+
+        - `path/to/environment.toml` or a directory holding one -> `from_manifest`
+        - anything else is taken as an image reference (`ghcr.io/me/env:1.2`, `my-env:dev`)
+
+        `overrides` are applied on top, so a CLI flag beats what the manifest declared.
+        """
+        p = Path(spec).expanduser()
+        if p.is_dir():
+            p = p / "environment.toml"
+        base = cls.from_manifest(p) if p.is_file() else cls(image=spec)
+        return replace(base, **{k: v for k, v in overrides.items() if v not in (None, "", ())})
 
 
 class Sandbox(Protocol):
@@ -67,7 +111,7 @@ class LocalSandbox:
             timeout_s: int, mounts: tuple[tuple[str, str], ...] = ()
             ) -> subprocess.CompletedProcess:
         return subprocess.run(command, capture_output=True, text=True, cwd=str(run_root),
-                              env={**dict(env)}, timeout=timeout_s)
+                              env={**dict(env)}, timeout=timeout_s, check=False)
 
 
 class DockerSandbox:
@@ -95,10 +139,17 @@ class DockerSandbox:
             argv += ["--memory", c.mem_limit]
         if c.cpus:
             argv += ["--cpus", c.cpus]
+        if c.workdir:
+            argv += ["--workdir", c.workdir]
+        if c.user:
+            argv += ["--user", c.user]
         for host, cont in c.extra_mounts:
             argv += ["-v", f"{host}:{cont}"]
         for key in c.env_passthrough:
             if key in env:
                 argv += ["-e", f"{key}={env[key]}"]
-        argv += [c.image, *(c.entrypoint or ()), *command]
-        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s)
+        for key, value in c.env.items():
+            argv += ["-e", f"{key}={value}"]
+        argv += [*c.extra_args, c.image, *(c.entrypoint or ()), *command]
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s,
+                              check=False)

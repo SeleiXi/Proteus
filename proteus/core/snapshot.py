@@ -21,15 +21,26 @@ def _git(work_tree: Path, *args: str) -> str:
     ).stdout
 
 
-def init(work_tree: Path) -> None:
-    """Create the bare snapshot repo and commit the seeded (episode-0) state."""
+def init(work_tree: Path) -> bool:
+    """Create the bare snapshot repo and commit the seeded (episode-0) state.
+
+    Returns False if a repo was already there (nothing was initialised) — callers that
+    must start from a clean seed check this rather than assume.
+    """
     git_dir = work_tree.parent / ".snapshot.git"
     if git_dir.exists():
-        return
+        return False
     subprocess.run(["git", "init", "--bare", "-q", str(git_dir)], check=True)
     _git(work_tree, "config", "user.email", "proteus@localhost")
     _git(work_tree, "config", "user.name", "proteus")
+    # No ignore rules apply to a harness snapshot. The harness is the measured object, so
+    # nothing in it may be invisible: not files matched by the user's global gitignore
+    # (`*.jsonl` is a common one, and traces are jsonl), and not files matched by a
+    # `.gitignore` the agent itself writes — that would let a harness hide its own state
+    # from the instrument.
+    _git(work_tree, "config", "core.excludesFile", "/dev/null")
     commit(work_tree, "episode 0: seeded harness")
+    return True
 
 
 def commit(work_tree: Path, message: str) -> str:
@@ -39,7 +50,8 @@ def commit(work_tree: Path, message: str) -> str:
     every episode maps to exactly one commit — the checkpoint mapping crystallization and
     path-length rely on must have no gaps.
     """
-    _git(work_tree, "add", "-A")
+    # `-f`: include files any ignore rule would exclude (see `init`)
+    _git(work_tree, "add", "-A", "-f", "--", ".")
     subprocess.run(
         ["git", "--git-dir", str(work_tree.parent / ".snapshot.git"),
          "--work-tree", str(work_tree), "commit", "-q", "--allow-empty", "-m", message],
@@ -49,7 +61,6 @@ def commit(work_tree: Path, message: str) -> str:
 
 
 def head(work_tree: Path) -> str:
-    git_dir = work_tree.parent / ".snapshot.git"
     try:
         return _git(work_tree, "rev-parse", "HEAD").strip()
     except subprocess.CalledProcessError:
@@ -77,11 +88,12 @@ def restore(work_tree: Path, sha: str) -> None:
     returns to the last accepted state. Deliberately NOT `reset --hard`: that moves the
     branch pointer and orphans any commit made after `sha` — which would silently drop
     the preserved rejected-candidate commit from history. `restore --source` rewrites
-    index + worktree only; `clean -fd` then removes files that became untracked (added
-    after `sha`).
+    index + worktree only; `clean -fdx` then removes files that became untracked (added
+    after `sha`). The `x` matters: without it a rejected episode's ignored files survive
+    the restore, and the next episode wakes up with state selection was supposed to undo.
     """
     _git(work_tree, "restore", "--source", sha, "--staged", "--worktree", "--", ".")
-    _git(work_tree, "clean", "-fd")
+    _git(work_tree, "clean", "-fdx")
 
 
 def materialize(work_tree: Path, sha: str, dest: Path) -> None:

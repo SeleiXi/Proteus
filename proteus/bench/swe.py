@@ -40,7 +40,7 @@ GRADE_TIMEOUT_S = 1800
 
 
 def _load_instance(instance_id: str, dataset: str, split: str) -> dict[str, Any]:
-    from datasets import load_dataset  # noqa: PLC0415
+    from datasets import load_dataset
     for row in load_dataset(dataset, split=split):
         if row["instance_id"] == instance_id:
             return dict(row)
@@ -63,10 +63,12 @@ def _grade(ws: Path, inst: dict[str, Any], episode_tag: str) -> EvalResult:
         return EvalResult(name=name, score=0.0, passed=False, detail="empty patch")
 
     try:
-        import docker  # noqa: PLC0415
-        from swebench.harness.run_evaluation import run_instance  # noqa: PLC0415
+        from swebench.harness.run_evaluation import run_instance
+
         # the flat `swebench.harness.test_spec` import is broken across versions
-        from swebench.harness.test_spec.test_spec import make_test_spec  # noqa: PLC0415
+        from swebench.harness.test_spec.test_spec import make_test_spec
+
+        import docker
     except ImportError as exc:
         return EvalResult(name=name, score=0.0, passed=False,
                           detail=f"grading deps missing ({exc}); "

@@ -23,7 +23,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable, Sequence
 
 from proteus.core.adapter import ActionEvent
 from proteus.core.goal import EvalResult, Goal, GoalConfig, GoalContext, Visibility
@@ -57,10 +57,10 @@ def workspace_diff(ws: Path, base: str = "") -> str:
     ws = Path(ws)
     if not (ws / ".git").exists():
         return ""
-    subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True)
+    subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True, check=False)
     ref = base or "HEAD"
     out = subprocess.run(["git", "-C", str(ws), "diff", "--cached", ref],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, check=False)
     return out.stdout
 
 

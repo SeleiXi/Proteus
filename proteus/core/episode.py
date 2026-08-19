@@ -20,10 +20,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
+from proteus.core import snapshot
 from proteus.core.adapter import EpisodeSpec, HarnessAdapter
 from proteus.core.disposition import Disposition
-from proteus.core.goal import EvalResult, GoalConfig, GoalContext, Visibility
-from proteus.core import snapshot
+from proteus.core.goal import GoalConfig, GoalContext
 
 PHASES = ("observe", "propose", "act", "reflect")
 
@@ -90,6 +90,7 @@ def _phase_prompts(cfg: RunConfig, prior_feedback: str) -> dict[str, str]:
 def _append_progress(cfg: RunConfig, ep: int, res, trace, accepted: bool, results) -> None:
     """One JSON line per finished episode, for the live report. Never inside cfg.root."""
     import time
+
     from proteus.measure import distance
     units = distance.units(cfg.root / "harness", cfg.adapter.surfaces())
     rec = {

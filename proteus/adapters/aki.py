@@ -95,9 +95,9 @@ class AkiHarness:
         os.environ["AKI_EPISODE_DOCKER"] = "1" if self.docker else "0"
         if str(self.src) not in sys.path:
             sys.path.insert(0, str(self.src))
-        from experiments import grid                      # noqa: PLC0415
-        from experiments.runner import supervisor         # noqa: PLC0415
-        from experiments.runner.config import Condition, RunConfig  # noqa: PLC0415
+        from experiments import grid
+        from experiments.runner import supervisor
+        from experiments.runner.config import Condition, RunConfig
         return grid, supervisor, Condition, RunConfig
 
     def _arm_label(self, disposition: Disposition) -> str:

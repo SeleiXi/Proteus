@@ -20,7 +20,7 @@ run and a goal run are read with the same ruler.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Mapping, Sequence
 

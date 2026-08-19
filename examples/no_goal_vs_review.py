@@ -7,9 +7,9 @@ then prints the structural (what got built) and behavioural (R) measurements. Th
 shape of the paper's Step-2 experiment, in miniature and dependency-free.
 """
 
-from pathlib import Path
 import statistics as st
 import tempfile
+from pathlib import Path
 
 from proteus.adapters.minimal import MinimalHarness
 from proteus.core import NEUTRAL, GoalConfig, review

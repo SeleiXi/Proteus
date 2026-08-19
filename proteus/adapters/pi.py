@@ -61,15 +61,18 @@ class PiHarness:
 
     def __init__(self, image: str = IMAGE, network: str = "host",
                  provider: str = "deepseek", model: str = "deepseek-v4-flash",
-                 key: str | None = None) -> None:
+                 key: str | None = None, sandbox=None,
+                 phase_timeout_s: int = PHASE_TIMEOUT_S) -> None:
         self.image = image
         self.network = network
         self.provider = provider
         self.model = model
+        self.phase_timeout_s = phase_timeout_s
         # per-instance key injection first (multi-tenant runs must not share env)
         self.key = key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY", "")
         from proteus.sandbox import DockerSandbox, SandboxConfig
-        self.sandbox = DockerSandbox(SandboxConfig(
+        # a caller may pass its own environment (see DshHarness.__init__)
+        self.sandbox = sandbox or DockerSandbox(SandboxConfig(
             network=network, image=image, env_passthrough=("DEEPSEEK_API_KEY",),
         ))
 
@@ -117,18 +120,18 @@ class PiHarness:
                      "--session-dir", "/state", "--skill", "/workspace/skills",
                      "-p", spec.phase_prompts.get(phase, phase)],
                     env={"DEEPSEEK_API_KEY": self.key},
-                    timeout_s=PHASE_TIMEOUT_S,
+                    timeout_s=self.phase_timeout_s,
                     mounts=((str(harness), "/workspace"), (str(state), "/state")),
                 )
             except subprocess.TimeoutExpired:
-                error = f"phase {phase}: timeout after {PHASE_TIMEOUT_S}s"
+                error = f"phase {phase}: timeout after {self.phase_timeout_s}s"
                 break
             if proc.returncode != 0:
                 error = f"phase {phase}: exit {proc.returncode}: {proc.stderr[-400:]}"
                 break
             new = self._sessions(state) - before
             if new:
-                mapping[phase] = sorted(new)[0].name
+                mapping[phase] = min(new).name
         (run_root / "traces" / f"ep{spec.episode:03d}.json").write_text(
             json.dumps(mapping, indent=1))
         trace = self.read_trace(run_root, spec.episode)

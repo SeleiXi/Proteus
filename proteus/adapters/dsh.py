@@ -77,13 +77,18 @@ class DshHarness:
     )
 
     def __init__(self, image: str = IMAGE, network: str = "host",
-                 key: str | None = None) -> None:
+                 key: str | None = None, sandbox=None,
+                 phase_timeout_s: int = PHASE_TIMEOUT_S) -> None:
         self.image = image
         self.network = network
+        self.phase_timeout_s = phase_timeout_s
         # per-instance key injection first (multi-tenant runs must not share env)
         self.key = key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY", "")
         from proteus.sandbox import DockerSandbox, SandboxConfig
-        self.sandbox = DockerSandbox(SandboxConfig(
+        # `sandbox` lets a caller supply its own environment — a different image, extra
+        # mounts, a GPU flag — without subclassing the adapter. The default keeps the
+        # prepared image and the passthrough dsh needs.
+        self.sandbox = sandbox or DockerSandbox(SandboxConfig(
             network=network, image=image,
             env_passthrough=("DEEPSEEK_API_KEY", "DSH_PERMISSION_MODE"),
         ))
@@ -129,18 +134,18 @@ class DshHarness:
                     ["--profile", "headless", spec.phase_prompts.get(phase, phase)],
                     env={"DEEPSEEK_API_KEY": self.key,
                          "DSH_PERMISSION_MODE": "workspace-write"},
-                    timeout_s=PHASE_TIMEOUT_S,
+                    timeout_s=self.phase_timeout_s,
                     mounts=((str(harness), "/workspace"), (str(state), "/state")),
                 )
             except subprocess.TimeoutExpired:
-                error = f"phase {phase}: timeout after {PHASE_TIMEOUT_S}s"
+                error = f"phase {phase}: timeout after {self.phase_timeout_s}s"
                 break
             if proc.returncode != 0:
                 error = f"phase {phase}: exit {proc.returncode}: {proc.stderr[-400:]}"
                 break
             new = self._session_dirs(state) - before
             if new:
-                mapping[phase] = str(sorted(new)[0].relative_to(state))
+                mapping[phase] = str(min(new).relative_to(state))
         (run_root / "traces" / f"ep{spec.episode:03d}.json").write_text(
             json.dumps(mapping, indent=1))
         trace = self.read_trace(run_root, spec.episode)
