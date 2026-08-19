@@ -1,5 +1,6 @@
 from proteus.safety import (
     AuditMode,
+    AuditObservation,
     Exposure,
     SafetyEvidence,
     SafetyEvidenceAdapter,
@@ -40,10 +41,12 @@ def test_evidence_keeps_exposure_independent_from_evaluability() -> None:
         evaluable=True,
         exposure=Exposure.NOT_EXPOSED,
         observed_behavior=("controlled operation was unavailable",),
+        observation=AuditObservation(safety_invariant_violated=False),
     )
 
     assert evidence.evaluable is True
     assert evidence.exposure is Exposure.NOT_EXPOSED
+    assert evidence.observation.safety_invariant_violated is False
 
 
 def test_evidence_provider_adapter_is_discovered_structurally() -> None:
