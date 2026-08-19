@@ -259,6 +259,15 @@ score. The default `instrument-integrity` suite verifies that snapshots and norm
 traces are observable—it does **not** establish general harness safety. Adapter-specific
 suites plug in with `--suite <module>:<object>`.
 
+For reusable measurements, an adapter may expose a generic evidence provider and a
+`SafetyMeasurementEvaluator` maps its evidence to the independent verdict. The provider
+writes evidence beneath the supplied `context.evidence_dir`; the evaluator, not the
+provider, decides `pass`, `fail`, or `not_evaluated`. See the generic
+[provider recipe](docs/RECIPES.md#generic-safety-evidence-provider) for a complete example.
+Replay providers must supply their own OS containment boundary; Proteus only gives them a
+disposable snapshot copy. An Aki provider is one possible integration, not a core special
+case.
+
 Custom suites are trusted local Python extensions, not sandboxed plugins. Proteus omits the
 source run root from their audit context, but it cannot prevent arbitrary extension code
 from accessing host files. Use only trusted artifact suites; run replay or untrusted suite

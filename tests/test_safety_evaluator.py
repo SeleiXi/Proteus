@@ -1,5 +1,8 @@
+import json
 from pathlib import Path
 
+from proteus.adapters.minimal import MinimalHarness
+from proteus.core import NEUTRAL, GoalConfig
 from proteus.core.adapter import Surface
 from proteus.safety import (
     AuditContext,
@@ -17,6 +20,8 @@ from proteus.safety.evaluator import (
     SafetyMeasurementEvaluator,
 )
 from proteus.safety.model import AuditTaxonomy
+from proteus.safety.runner import run_audit
+from proteus.sweep import SweepConfig, run_sweep
 
 
 class FixtureProvider:
@@ -62,6 +67,34 @@ class MutatingReplayProvider:
         )
 
 
+class RecordingReplayProvider:
+    name = "recording-replay"
+
+    def __init__(self, *, raises_for: frozenset[str] = frozenset()) -> None:
+        self.raises_for = raises_for
+        self.received_states: list[str] = []
+
+    def collect(self, request, context) -> SafetyEvidence:
+        received_state = (context.snapshot_root / "STATE.md").read_text(encoding="utf-8")
+        self.received_states.append(received_state)
+        evidence = context.evidence_dir / "provider-evidence.json"
+        evidence.write_text(
+            json.dumps({"scenario": request.scenario, "state": received_state}) + "\n",
+            encoding="utf-8",
+        )
+        (context.snapshot_root / "STATE.md").write_text("provider mutation\n", encoding="utf-8")
+        if request.scenario in self.raises_for:
+            raise RuntimeError(f"provider boom: {request.scenario}")
+        return SafetyEvidence(
+            mode=AuditMode.CONTAINED_REPLAY,
+            evaluable=True,
+            evidence_refs=(evidence.relative_to(context.audit_root).as_posix(),),
+            observation=AuditObservation(
+                safety_invariant_violated=request.scenario == "violated"
+            ),
+        )
+
+
 def _taxonomy() -> AuditTaxonomy:
     return AuditTaxonomy(
         target="generic-agent",
@@ -83,6 +116,48 @@ def _definition(mode: AuditMode = AuditMode.ARTIFACT) -> SafetyMeasurementDefini
         failure="the controlled invariant was violated",
         request=SafetyEvidenceRequest(mode=mode, scenario="literal-scenario"),
     )
+
+
+def _replay_definition(case_id: str, scenario: str) -> SafetyMeasurementDefinition:
+    return SafetyMeasurementDefinition(
+        case_id=case_id,
+        taxonomy=AuditTaxonomy(
+            target="generic-agent",
+            scope="local",
+            initiating_source="external-instrument",
+            episode_phases=("act",),
+            evolution_stages=("committed_state",),
+            failure_mode="invariant_violation",
+            evidence_authority="independent_oracle",
+            evidence_method=AuditMode.CONTAINED_REPLAY.value,
+        ),
+        expected_behavior=("the replayed safety invariant holds",),
+        failure="the replayed safety invariant was violated",
+        request=SafetyEvidenceRequest(mode=AuditMode.CONTAINED_REPLAY, scenario=scenario),
+    )
+
+
+def _completed_sweep(tmp_path: Path) -> tuple[Path, MinimalHarness, str]:
+    sweep_root = tmp_path / "sweep"
+    run_sweep(
+        SweepConfig(
+            name="safety-evaluator-integration",
+            adapter_factory=MinimalHarness,
+            arms=(NEUTRAL,),
+            seeds=1,
+            goal=GoalConfig.no_goal(),
+            root=sweep_root,
+            model="mock",
+            episodes=1,
+        )
+    )
+    run_root = next((sweep_root / "runs").iterdir())
+    source_state = (run_root / "harness" / "STATE.md").read_text(encoding="utf-8")
+    return sweep_root, MinimalHarness(), source_state
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
 def _context(tmp_path: Path) -> AuditContext:
@@ -356,3 +431,75 @@ def test_replay_provider_receives_a_disposable_snapshot_copy(tmp_path: Path) -> 
 
     assert assessment.status.value == "pass"
     assert not (context.snapshot_root / "provider-owned.txt").exists()
+
+
+def test_evaluator_replay_publishes_sidecars_and_isolates_cases_and_source(
+    tmp_path: Path,
+) -> None:
+    sweep_root, adapter, source_state = _completed_sweep(tmp_path)
+    provider = RecordingReplayProvider()
+    evaluator = SafetyMeasurementEvaluator(
+        name="generic-replay",
+        version="1",
+        definitions=(
+            _replay_definition("safe-replay", "safe"),
+            _replay_definition("violated-replay", "violated"),
+        ),
+        provider=provider,
+    )
+
+    summary = run_audit(sweep_root, adapter, evaluator, audit_id="generic-replay-v1")
+
+    assert summary.status_counts == {"fail": 1, "pass": 1}
+    assert summary.audit_root == sweep_root / "audits/generic-replay-v1"
+    assert (summary.audit_root / "manifest.json").is_file()
+    assert summary.results_path.is_file()
+    assert summary.summary_path.is_file()
+    manifest = json.loads((summary.audit_root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["audit_id"] == "generic-replay-v1"
+    assert manifest["suite"] == "generic-replay"
+    assert manifest["source_sweep"] == str(sweep_root.resolve())
+    rows = _read_jsonl(summary.results_path)
+    assert [row["status"] for row in rows] == ["pass", "fail"]
+    assert json.loads(summary.summary_path.read_text(encoding="utf-8"))["status_counts"] == {
+        "fail": 1,
+        "pass": 1,
+    }
+    evidence_paths = [
+        summary.audit_root / row["evidence_refs"][0]
+        for row in rows
+    ]
+    assert [json.loads(path.read_text(encoding="utf-8"))["scenario"] for path in evidence_paths] == [
+        "safe",
+        "violated",
+    ]
+    assert provider.received_states == [source_state, source_state]
+    run_root = next((sweep_root / "runs").iterdir())
+    assert (run_root / "harness" / "STATE.md").read_text(encoding="utf-8") == source_state
+    index = json.loads((sweep_root / "audits/index.json").read_text(encoding="utf-8"))
+    assert index["audits"][0]["id"] == "generic-replay-v1"
+    assert index["audits"][0]["results"] == "generic-replay-v1/results.jsonl"
+
+
+def test_throwing_replay_provider_becomes_error_and_later_definition_runs(
+    tmp_path: Path,
+) -> None:
+    sweep_root, adapter, _ = _completed_sweep(tmp_path)
+    provider = RecordingReplayProvider(raises_for=frozenset({"throws"}))
+    evaluator = SafetyMeasurementEvaluator(
+        name="provider-errors",
+        version="1",
+        definitions=(
+            _replay_definition("throws", "throws"),
+            _replay_definition("safe-after-error", "safe"),
+        ),
+        provider=provider,
+    )
+
+    summary = run_audit(sweep_root, adapter, evaluator, audit_id="provider-errors-v1")
+
+    rows = _read_jsonl(summary.results_path)
+    assert [row["status"] for row in rows] == ["error", "pass"]
+    assert "provider boom: throws" in rows[0]["error"]
+    assert len(provider.received_states) == 2
+    assert provider.received_states[1] == provider.received_states[0]
