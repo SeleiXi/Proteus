@@ -11,16 +11,17 @@ whose root mirrors `web/static/`.
 | Path | What it is |
 |---|---|
 | [`web/static/index.html`](static/index.html) | The landing page. ~500 lines of CSS and ~500 of JS inline, both in `<style>`/`<script>` blocks. Everything below under "The landing page" lives here. |
-| [`web/static/playground.html`](static/playground.html) | The Lab: submit a run (harness, arm, goal, episode count, own API key) to the backend. |
+| [`web/static/playground.html`](static/playground.html) | The public Evolving Lab: three curated episode-by-episode replays. Hosted run creation is intentionally unavailable; the plus card points people to the repository. |
 | [`web/static/run.html`](static/run.html) | Live tracker for one submitted run: polls the backend, draws the identity fabric (one cell per episode, coloured by the surface that grew most). |
 | [`web/static/demo.html`](static/demo.html) | Specimen viewer for a single recorded trajectory. |
 | [`web/static/assets/site.css`](static/assets/site.css) | The only shared stylesheet: design tokens, both themes, and the components every page uses (`.wrap`, `.btn`, `.micro`, `table`, `.fabric`, `header.site`, nav pills). |
 | [`web/static/assets/theme.js`](static/assets/theme.js) | Theme toggle. Writes `data-theme` on `<html>` and remembers the choice. |
 | [`web/static/assets/case-data.js`](static/assets/case-data.js) | `window.CASE` — the replayed trajectory the landing page animates. Real data from one fleet seed (control arm, 30 episodes), scrubbed. |
 | [`web/static/assets/demo-data.js`](static/assets/demo-data.js) | The same shape, for `demo.html`. |
+| [`web/static/assets/lab-data.js`](static/assets/lab-data.js) | Editorial metadata and one-sentence summaries for every episode shown in the public Evolving Lab. |
 | [`web/static/assets/proteus-mark.svg`](static/assets/proteus-mark.svg) | Graph mark alone. |
 | [`web/static/assets/proteus-logo.svg`](static/assets/proteus-logo.svg) | Graph mark + traced PROTEUS wordmark, both centred on a shared axis in a 621x734 box. |
-| [`web/server.py`](server.py) | Hosted-lab backend: a FIFO queue with a concurrency cap, a harness allowlist, per-run episode caps, and the run/status JSON endpoints the two Lab pages call. Localhost / trusted network only — see its module docstring. |
+| [`web/server.py`](server.py) | Reserved local/future Lab backend: a FIFO queue with a concurrency cap, a harness allowlist, per-run episode caps, and run/status JSON endpoints. The public Evolving Lab does not call it. Localhost / trusted network only — see its module docstring. |
 
 The two `.png` files in `assets/` are the original raster logo and an architecture
 diagram. The vector `.svg` files replaced the logo PNG on every page; the PNG is kept
@@ -85,7 +86,8 @@ Serve the directory and open it — any static server will do:
 python3 -m http.server 8000 --directory web/static
 ```
 
-The backend is only needed for the Lab pages:
+The backend is retained for local development and future hosted runs. The public
+Evolving Lab is a static replay gallery and does not call it:
 
 ```bash
 python3 web/server.py --max-concurrent 2
