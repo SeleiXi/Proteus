@@ -106,23 +106,52 @@ def _append_progress(cfg: RunConfig, ep: int, res, trace, accepted: bool, result
         sink.write(json.dumps(rec) + "\n")
 
 
-def run(cfg: RunConfig) -> RunResult:
-    """Run one seed's full trajectory, harness retained under `cfg.root`."""
+def completed_episodes(cfg: RunConfig) -> int:
+    """Contiguous episodes already snapshotted under `cfg.root`, for mid-seed resume.
+
+    Counts commits, not trace files: a provider outage writes a trace per failed attempt,
+    and counting those reports a seed that never finished an episode as complete. Counting
+    is contiguous from 1 because a gap means the chain the measurement walks is broken.
+    """
     harness = cfg.root / "harness"
-    cfg.adapter.seed(harness, cfg.seed)
-    cfg.adapter.install_disposition(harness, cfg.disposition)
-    if cfg.task is not None:
-        from proteus.bench.task import seed_task
-        seed_task(harness, cfg.task)
-    snapshot.init(harness)
+    if not (harness.parent / ".snapshot.git").exists():
+        return 0
+    ep = 0
+    while snapshot.commit_for_episode(harness, ep + 1) is not None:
+        ep += 1
+    return ep
+
+
+def run(cfg: RunConfig, start: int = 0) -> RunResult:
+    """Run one seed's full trajectory, harness retained under `cfg.root`.
+
+    `start` resumes an interrupted seed: episodes up to and including `start` are taken as
+    done and the harness on disk is used as-is. Re-seeding a resumed root would overwrite
+    the evolved harness with fresh templates, so provisioning is skipped entirely — at
+    tens of minutes per episode, restarting a seed that died at episode 26 throws away
+    real trajectory, which is why this exists.
+    """
+    harness = cfg.root / "harness"
+    if start:
+        if completed_episodes(cfg) < start:
+            raise ValueError(
+                f"cannot resume {cfg.root} at episode {start}: only "
+                f"{completed_episodes(cfg)} episodes are snapshotted there")
+    else:
+        cfg.adapter.seed(harness, cfg.seed)
+        cfg.adapter.install_disposition(harness, cfg.disposition)
+        if cfg.task is not None:
+            from proteus.bench.task import seed_task
+            seed_task(harness, cfg.task)
+        snapshot.init(harness)
 
     eval_history: list[dict] = []
     prior_feedback = ""
     error = ""
-    done = 0
-    last_accepted = snapshot.head(harness)   # episode-0 state
+    done = start
+    last_accepted = snapshot.head(harness)   # episode-0 state, or the resume point
     best_score: float | None = None
-    for ep in range(1, cfg.episodes + 1):
+    for ep in range(start + 1, cfg.episodes + 1):
         spec = EpisodeSpec(
             root=cfg.root, episode=ep, model=cfg.model,
             phase_prompts=_phase_prompts(cfg, prior_feedback),

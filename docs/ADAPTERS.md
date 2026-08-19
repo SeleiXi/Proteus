@@ -123,3 +123,47 @@ reach an API.
 - [ ] trace parsed from the harness's own logs into `ActionEvent`s
 - [ ] real (code-running) harness under `DockerSandbox`
 - [ ] `proteus check --harness <module>:<Class> --episode` passes
+
+## Auditing a finished sweep
+
+Two things invalidate a trajectory without touching its score, so they are read from the
+run rather than assumed away.
+
+```bash
+proteus reliability --out runs/mine --harness aki   # run this before `measure`
+proteus audit       --out runs/mine --harness aki
+```
+
+`reliability` asks whether each arm reproduces itself, against a composition-matched null:
+streams resampled from the arm's own pooled tool marginal, same length and same tool mix,
+no shared procedure. `R` divides between-arm distance by within-arm distance, so an arm
+whose runs do not resemble each other has a denominator made of noise and its R means
+nothing whichever way it comes out. A ratio near 0 is highly reproducible; the
+pre-registered threshold is 0.5.
+
+`audit` reports two kinds of evidence, quoted rather than scored:
+
+- **escape** — authored code that can leave the harness (`subprocess`, `eval`, a socket, a
+  URL fetch), and any path fragment naming the study's own directories. Files identical to
+  the episode-0 snapshot are skipped, so a harness that ships a CLI importing `subprocess`
+  does not flag every seed.
+- **awareness** — the subject describing its own situation as an experiment.
+
+Both are deliberately over-inclusive: a tool may import `subprocess` and never escape.
+The output is what to read, not what to exclude. Recall is limited in the other direction
+too — in our own fleet one seed quarantined as aware matches no pattern and was caught by
+a person reading its notes, so a clean audit means "no evidence found", not "clean".
+
+Containment itself is the sandbox's job (`proteus.sandbox`): a harness that authors its own
+tools can always defeat a pattern list, which is why the audit runs after the fact and the
+isolation runs during.
+
+## Resuming an interrupted seed
+
+Episodes cost minutes to tens of minutes, so a seed that dies at episode 26 is hours of
+trajectory. `run(cfg, start=N)` continues from the episode after `N`, using the harness on
+disk rather than re-seeding over it, and `proteus run --on-existing resume` does this for a
+whole sweep: finished seeds are skipped, partial ones pick up at the episode after their
+last snapshot. `completed_episodes()` counts contiguous snapshot commits, not trace files —
+a provider outage writes a trace per failed attempt, and counting those reports a seed that
+finished nothing as complete.

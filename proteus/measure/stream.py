@@ -60,6 +60,49 @@ def ncd(a: Sequence[str], b: Sequence[str]) -> float:
     return (cab - min(ca, cb)) / max(ca, cb) if max(ca, cb) else 0.0
 
 
+def _resample(stream: Sequence[str], pool: Sequence[str], rng: random.Random) -> list[str]:
+    """A stream of the same length drawn from `pool`: same composition, no procedure."""
+    return [rng.choice(pool) for _ in stream]
+
+
+def reliability(streams: Sequence[Sequence[str]], level: str = "freq",
+                draws: int = 200, seed: int = 0) -> dict:
+    """Does one condition reproduce itself? The prerequisite for any group comparison.
+
+    `between_within` divides between-condition distance by within-condition distance, so
+    if a condition does not reproduce itself the denominator is noise and R means nothing
+    whichever way it comes out. This is therefore reported *before* R, and a failure here
+    voids the comparison rather than qualifying it.
+
+    The reference is a **composition-matched null**: streams resampled token by token from
+    the condition's own pooled marginal, so a null stream has the same length and the same
+    tool mix but no shared procedure. `within` far below `null` means runs of one condition
+    share structure that random draws from the same tool budget do not produce.
+
+    Returns `within`, `null`, their ratio (near 0 = highly reproducible, near 1 = no better
+    than chance) and `reliable`, the pre-registered `ratio < 0.5`.
+    """
+    dist = {"freq": freq_distance, "order": order_distance, "ncd": ncd}[level]
+    runs = [list(s) for s in streams]
+    if len(runs) < 2:
+        raise ValueError("reliability needs at least two runs of the condition")
+    pairs = list(itertools.combinations(range(len(runs)), 2))
+    within = sum(dist(runs[i], runs[j]) for i, j in pairs) / len(pairs)
+
+    pool = [tok for s in runs for tok in s]
+    if not pool:
+        raise ValueError("reliability needs at least one action across the runs")
+    rng = random.Random(seed)
+    nulls = []
+    for _ in range(draws):
+        fake = [_resample(s, pool, rng) for s in runs]
+        nulls.append(sum(dist(fake[i], fake[j]) for i, j in pairs) / len(pairs))
+    null = sum(nulls) / len(nulls)
+    ratio = within / null if null > 0 else float("nan")
+    return {"within": within, "null": null, "ratio": ratio, "level": level,
+            "n_runs": len(runs), "reliable": null > 0 and ratio < 0.5}
+
+
 def between_within(streams: dict[str, list[list[str]]], level: str = "freq",
                    permutations: int = 10000, seed: int = 0) -> dict:
     """R = mean between-label distance / mean within-label distance, with a permutation p.

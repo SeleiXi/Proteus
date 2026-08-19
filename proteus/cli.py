@@ -136,6 +136,66 @@ def cmd_run(args) -> int:
     return 0
 
 
+def cmd_audit(args) -> int:
+    """Which seeds left their harness, and which worked out they are an instrument."""
+    import json as _json
+
+    from proteus.measure import audit
+    root = Path(args.out).expanduser()
+    adapter = _adapter_factory(args.harness)()
+    records = [_json.loads(line)
+               for line in (root / "seeds.jsonl").read_text().splitlines() if line.strip()]
+    # the study's own directories are what a subject must not be naming back at us
+    outside = tuple(args.outside) or (str(root / "runs"), str(root))
+    flagged = 0
+    for rec in records:
+        run_root = Path(rec["root"])
+        trace = adapter.read_trace(run_root, rec.get("episodes_complete", 0))
+        result = audit.audit_run(run_root, trace, outside=outside)
+        if result.clean:
+            continue
+        flagged += 1
+        print(f"\n{rec['arm']}/{rec['seed']}  {result}")
+        for f in result.findings[:args.max_findings]:
+            print(f"    [{f.kind}] {f.where}: {f.detail}")
+            if f.quote:
+                print(f"        {f.quote[:160]}")
+    print(f"\n{flagged} of {len(records)} seeds flagged. "
+          "Findings are evidence to read, not a verdict — a tool may import subprocess "
+          "and never leave.")
+    return 0
+
+
+def cmd_reliability(args) -> int:
+    """Does each arm reproduce itself? Report before reading any between-arm ratio."""
+    import json as _json
+    from collections import defaultdict
+
+    from proteus.measure import stream
+    root = Path(args.out).expanduser()
+    adapter = _adapter_factory(args.harness)()
+    records = [_json.loads(line)
+               for line in (root / "seeds.jsonl").read_text().splitlines() if line.strip()]
+    by_arm = defaultdict(list)
+    for rec in records:
+        trace = adapter.read_trace(Path(rec["root"]), rec.get("episodes_complete", 0))
+        by_arm[rec["arm"]].append(stream.tool_stream(trace))
+    print(f"{'arm':<18}{'n':>4}{'within':>10}{'null':>10}{'ratio':>8}  reliable")
+    ok = True
+    for arm, runs in sorted(by_arm.items()):
+        if len(runs) < 2:
+            print(f"{arm:<18}{len(runs):>4}   (needs 2+ runs)")
+            continue
+        r = stream.reliability(runs, level=args.level, draws=args.draws)
+        ok &= r["reliable"]
+        print(f"{arm:<18}{r['n_runs']:>4}{r['within']:>10.4f}{r['null']:>10.4f}"
+              f"{r['ratio']:>8.2f}  {'yes' if r['reliable'] else 'NO'}")
+    if not ok:
+        print("\nAn arm that does not reproduce itself voids the between-arm comparison: "
+              "R divides by that spread.")
+    return 0
+
+
 def _travel(run_root: Path, episodes: int, surfaces) -> dict:
     """Materialise every episode state from the snapshot chain and sum path length."""
     import tempfile
@@ -293,6 +353,23 @@ def main(argv=None) -> int:
     m.add_argument("--travel", action="store_true",
                    help="also compute per-surface path length over episode snapshots")
     m.set_defaults(func=cmd_measure)
+
+    a = sub.add_parser("audit", help="escape and awareness evidence for a finished sweep")
+    a.add_argument("--out", required=True)
+    a.add_argument("--harness", default="minimal")
+    a.add_argument("--outside", action="append", default=[],
+                   help="path fragment the subject must not name (repeatable); "
+                        "defaults to the sweep root")
+    a.add_argument("--max-findings", type=int, default=6)
+    a.set_defaults(func=cmd_audit)
+
+    rel = sub.add_parser("reliability",
+                         help="does each arm reproduce itself? (run before `measure`)")
+    rel.add_argument("--out", required=True)
+    rel.add_argument("--harness", default="minimal")
+    rel.add_argument("--level", default="freq", choices=("freq", "order", "ncd"))
+    rel.add_argument("--draws", type=int, default=200)
+    rel.set_defaults(func=cmd_reliability)
 
     c = sub.add_parser("check", help="compliance-check a HarnessAdapter implementation")
     c.add_argument("--harness", required=True, help="built-in name or <module>:<Class>")

@@ -16,7 +16,7 @@ from typing import Callable, Sequence
 
 from proteus.core.adapter import HarnessAdapter
 from proteus.core.disposition import Disposition
-from proteus.core.episode import RunConfig, run
+from proteus.core.episode import RunConfig, completed_episodes, run
 from proteus.core.goal import GoalConfig
 
 
@@ -40,8 +40,8 @@ class SweepConfig:
     previous sweep's *evolved* harness rather than from a clean seed, appends a second
     record per seed, and writes a second "episode 1" into the same snapshot history —
     contamination that is invisible in the output. "resume" skips seeds already recorded
-    complete and restarts any partial one from its seeded state; "overwrite" discards the
-    old run roots."""
+    complete and picks a partial one up at the episode after its last snapshot; "overwrite"
+    discards the old run roots."""
 
 
 def opaque_id(arm: str, seed: int) -> str:
@@ -66,6 +66,12 @@ def completed_seeds(root: Path, episodes: int) -> set[tuple[str, int]]:
     return done
 
 
+def completed_episodes_in(run_root: Path) -> int:
+    """Episodes already snapshotted in a run root, without needing its RunConfig."""
+    from types import SimpleNamespace
+    return completed_episodes(SimpleNamespace(root=run_root))
+
+
 def run_sweep(cfg: SweepConfig) -> list[dict]:
     if cfg.on_existing not in ("refuse", "resume", "overwrite"):
         raise ValueError(f"on_existing must be refuse/resume/overwrite, got {cfg.on_existing!r}")
@@ -88,6 +94,7 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
             for s in range(cfg.seeds):
                 rid = opaque_id(arm.label, s)
                 run_root = cfg.root / "runs" / rid
+                start = 0
                 if run_root.exists():
                     if cfg.on_existing == "refuse":
                         raise FileExistsError(
@@ -97,16 +104,22 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
                             "on_existing='resume' / 'overwrite'.")
                     if (arm.label, s) in done:
                         continue
-                    # partial (or errored) seed: no mid-seed resume exists, so start it
-                    # over from the seeded state rather than from half-evolved files
-                    shutil.rmtree(run_root)
+                    if cfg.on_existing == "overwrite":
+                        shutil.rmtree(run_root)
+                    else:
+                        # resume: pick the seed up where it stopped rather than paying for
+                        # its finished episodes twice
+                        start = completed_episodes_in(run_root)
+                        if start:
+                            print(f"resuming {arm.label} seed {s} at episode {start + 1}",
+                                  flush=True)
                 rc = RunConfig(
                     name=arm.label, adapter=cfg.adapter_factory(), disposition=arm,
                     goal=cfg.goal, root=run_root, model=cfg.model,
                     episodes=cfg.episodes, max_turns=cfg.max_turns, seed=s,
                     progress_path=cfg.root / "progress" / f"{rid}.jsonl",
                 )
-                res = run(rc)
+                res = run(rc, start=start)
                 rec = {"arm": arm.label, "seed": s, "root": str(run_root),
                        "episodes_complete": res.episodes_complete, "error": res.error}
                 records.append(rec)
