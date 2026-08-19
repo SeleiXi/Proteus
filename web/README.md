@@ -11,7 +11,7 @@ whose root mirrors `web/static/`.
 | Path | What it is |
 |---|---|
 | [`web/static/index.html`](static/index.html) | The landing page. ~500 lines of CSS and ~500 of JS inline, both in `<style>`/`<script>` blocks. Everything below under "The landing page" lives here. |
-| [`web/static/playground.html`](static/playground.html) | The public Evolving Lab: three curated episode-by-episode replays. Hosted run creation is intentionally unavailable; the plus card points people to the repository. |
+| [`web/static/playground.html`](static/playground.html) | The public Evolving Lab: three curated episode-by-episode replays with an expandable action stream, measurements, setup, and source note for every episode. Hosted run creation is intentionally unavailable; the plus card points people to the repository. |
 | [`web/static/run.html`](static/run.html) | Live tracker for one submitted run: polls the backend, draws the identity fabric (one cell per episode, coloured by the surface that grew most). |
 | [`web/static/demo.html`](static/demo.html) | Specimen viewer for a single recorded trajectory. |
 | [`web/static/assets/site.css`](static/assets/site.css) | The only shared stylesheet: design tokens, both themes, and the components every page uses (`.wrap`, `.btn`, `.micro`, `table`, `.fabric`, `header.site`, nav pills). |
