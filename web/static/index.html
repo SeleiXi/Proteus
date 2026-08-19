@@ -58,9 +58,10 @@ body.trace-front #live-card { opacity:1 }
 @media (prefers-reduced-motion: reduce) {
   .hero-sec .down, #traj circle.cur, #traj circle.halo, .sp-dot { animation:none }
   #traj circle.halo { display:none } }
-.trace-hint { position:absolute; top:9vh; left:5vw; z-index:2; pointer-events:none;
-  opacity:0; transition:opacity .8s }
-body.trace-front .trace-hint { opacity:1 }
+.trace-hint { position:fixed; top:9vh; left:5vw; z-index:3; pointer-events:none;
+  opacity:0; visibility:hidden;
+  transition:opacity .8s cubic-bezier(.32,.72,0,1), visibility 0s .8s }
+body.trace-front .trace-hint { opacity:1; visibility:visible; transition-delay:0s }
 .rest { position:relative; z-index:2; background:var(--bg) }
 section.page { height:100vh; scroll-snap-align:start; overflow-y:auto;
   display:flex; align-items:center; background:var(--bg);
