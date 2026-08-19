@@ -94,7 +94,7 @@ def test_accept_reject_reverts_worse_episode(tmp_path):
     # non-destructive: the rejected candidate tree is preserved in history
     log = subprocess.run(["git", "--git-dir", str(git_dir), "log", "--format=%H %s"],
                          capture_output=True, text=True, check=True).stdout
-    cand = next((l.split()[0] for l in log.splitlines()
-                 if "candidate 2:" in l), None)
+    cand = next((ln.split()[0] for ln in log.splitlines()
+                 if "candidate 2:" in ln), None)
     assert cand is not None
     assert tree(cand) != tree(sha1)          # the discarded work is still inspectable

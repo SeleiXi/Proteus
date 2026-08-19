@@ -60,7 +60,7 @@ def _defs(path: Path, rel: str) -> dict[str, str]:
         out[f"{rel}::{node.name}"] = _sha(seg)
     # module-level code outside any def is itself a unit: an agent that rewrites the
     # dispatch table at the bottom of loop.py has changed the harness
-    body = "".join(l for i, l in enumerate(lines, 1)
+    body = "".join(ln for i, ln in enumerate(lines, 1)
                    if not any(n.lineno <= i <= (n.end_lineno or n.lineno)
                               for n in tree.body
                               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef,

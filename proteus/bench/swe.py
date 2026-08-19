@@ -63,12 +63,11 @@ def _grade(ws: Path, inst: dict[str, Any], episode_tag: str) -> EvalResult:
         return EvalResult(name=name, score=0.0, passed=False, detail="empty patch")
 
     try:
+        import docker
         from swebench.harness.run_evaluation import run_instance
 
         # the flat `swebench.harness.test_spec` import is broken across versions
         from swebench.harness.test_spec.test_spec import make_test_spec
-
-        import docker
     except ImportError as exc:
         return EvalResult(name=name, score=0.0, passed=False,
                           detail=f"grading deps missing ({exc}); "

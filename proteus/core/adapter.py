@@ -142,4 +142,4 @@ class EpisodeResult:
 
 
 # `Disposition` is imported lazily to avoid a cycle; declared here for the Protocol only.
-from proteus.core.disposition import Disposition
+from proteus.core.disposition import Disposition  # noqa: E402

@@ -163,7 +163,8 @@ def cmd_measure(args) -> int:
     root = Path(args.out).expanduser()
     adapter = _adapter_factory(args.harness)()
     surfaces = adapter.surfaces()
-    records = [json.loads(l) for l in (root / "seeds.jsonl").read_text().splitlines()]
+    records = [json.loads(line)
+               for line in (root / "seeds.jsonl").read_text().splitlines()]
 
     # structural: per-arm, per-surface final unit counts (what got built)
     arm_surface = defaultdict(lambda: defaultdict(list))

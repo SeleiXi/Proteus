@@ -16,7 +16,7 @@ dependencies = []
 [project.optional-dependencies]
 llm = []  # the llm harness uses stdlib urllib; no SDK needed
 sandbox = []          # Docker is invoked via the CLI, no Python SDK required
-dev = ["pytest>=7.0", "ruff>=0.1.0"]
+dev = ["pytest>=7.0", "ruff==0.14.14"]
 
 [project.scripts]
 proteus = "proteus.cli:main"
