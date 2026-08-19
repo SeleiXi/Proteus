@@ -20,6 +20,7 @@
   <a href="#-60-second-demo-no-api-key-no-docker">Quick Start</a> •
   <a href="#-harnesses-in-the-box">Harnesses</a> •
   <a href="#%EF%B8%8F-how-it-works">How It Works</a> •
+  <a href="docs/EPISODE.md">The Episode Loop</a> •
   <a href="docs/ADAPTERS.md">Onboard Your Harness</a> •
   <a href="docs/RECIPES.md">Recipes</a> •
   <a href="docs/BENCHMARKS.md">Bring a Benchmark</a> •
