@@ -68,18 +68,38 @@ def test_broken_self_code_fails_the_episode_legibly(tmp_path):
     assert [c["command"] for c in sandbox.calls] == [["--version"]]
 
 
-def test_phases_carry_the_shadow_mounts(tmp_path):
+def test_dsh_phases_carry_the_shadow_mounts(tmp_path):
     from proteus.core.adapter import EpisodeSpec
     sandbox = FakeSandbox()
-    a = PiHarness(key="x", sandbox=sandbox)
+    a = DshHarness(key="x", sandbox=sandbox)
     h = tmp_path / "harness"
-    _seed_with_fake_src(a, h, ("dist", "package.json"))
+    _seed_with_fake_src(a, h, ("lib", "package.json"))
     a.run_episode(EpisodeSpec(root=tmp_path, episode=1, model="m", phase_prompts={}))
     phase_calls = [c for c in sandbox.calls if c["command"] != ["--version"]]
     assert phase_calls, "no phases ran"
     for call in phase_calls:
         conts = [cont for _, cont in call["mounts"]]
-        assert f"{a.pkg_path}/dist" in conts, "a phase booted without the seed's own code"
+        assert f"{a.pkg_path}/lib" in conts, "a phase booted without the seed's own code"
+
+
+def test_pi_source_mode_gates_and_boots_from_the_wrapper(tmp_path):
+    # pi's boot wrapper rebuilds from /workspace/src, so the gate needs no shadow mounts:
+    # workspace + state are the whole contract, and a broken source fails legibly
+    from proteus.core.adapter import EpisodeSpec
+    sandbox = FakeSandbox()
+    a = PiHarness(key="x", sandbox=sandbox)
+    h = tmp_path / "harness"
+    _seed_with_fake_src(a, h, ("packages",))
+    a.run_episode(EpisodeSpec(root=tmp_path, episode=1, model="m", phase_prompts={}))
+    gate = sandbox.calls[0]
+    assert gate["command"] == ["--version"]
+    conts = {cont for _, cont in gate["mounts"]}
+    assert conts == {"/workspace", "/state"}, "the gate must run exactly the boot contract"
+
+    broken = FakeSandbox(boot_rc=97)
+    b = PiHarness(key="x", sandbox=broken)
+    res = b.run_episode(EpisodeSpec(root=tmp_path, episode=1, model="m", phase_prompts={}))
+    assert not res.ok and "does not boot" in res.error
 
 
 def test_reseeding_never_overwrites_evolved_code(tmp_path):

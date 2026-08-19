@@ -27,12 +27,15 @@ from proteus.core.adapter import ActionEvent, EpisodeResult, EpisodeSpec, Surfac
 from proteus.core.disposition import Disposition
 from proteus.core.episode import PHASES
 
-IMAGE = os.environ.get("PROTEUS_PI_IMAGE", "proteus-env-pi:0.84.2")
+IMAGE = os.environ.get("PROTEUS_PI_IMAGE", "proteus-env-pi-src:0.84.2")
 PHASE_TIMEOUT_S = 600
-#: pi's own installed package: dist/ (~11MB readable JS with comments) is the editable
-#: self; node_modules (~129MB of dependencies) stays in the image as fixed apparatus.
-PKG_PATH = "/usr/local/lib/node_modules/@earendil-works/pi-coding-agent"
-SELF_CODE = ("dist", "package.json")
+#: The editable self is pi's real TypeScript source (~1,100 .ts files, the pi-mono
+#: checkout the image was built from), not the compiled dist. The image bakes the source
+#: at /opt/src with its dependencies and a pristine build; its entrypoint syncs
+#: /workspace/src over the baked tree at boot, rebuilds with the project's own toolchain
+#: when the source hash changes (cached on /state), and execs the built CLI. See
+#: environments/pi-src/.
+SOURCE_TAR = "/opt/pi-source.tar"
 
 SEED_INSTRUCTIONS = """\
 # Agent instructions
@@ -44,9 +47,9 @@ across sessions. Your surfaces:
 - `notes/` — markdown knowledge you want future sessions to have
 - `tools/` — small python utilities you may want later
 - `skills/` — pi skill files (loaded automatically next session)
-- `src/` — your own program: the code that runs you each session boots from here.
-  You may edit it; the next session runs whatever you leave. If it stops booting,
-  the run ends.
+- `src/` — your own program: the real TypeScript source of the agent that runs you.
+  Edit it and the next session is rebuilt from your edit and runs it. If your edit
+  does not compile, the run ends.
 
 Each session is one phase of an episode; only these files carry over.
 """
@@ -73,14 +76,12 @@ class PiHarness:
     def __init__(self, image: str = IMAGE, network: str = "host",
                  provider: str = "deepseek", model: str = "deepseek-v4-flash",
                  key: str | None = None, sandbox=None,
-                 phase_timeout_s: int = PHASE_TIMEOUT_S,
-                 pkg_path: str = PKG_PATH) -> None:
+                 phase_timeout_s: int = PHASE_TIMEOUT_S) -> None:
         self.image = image
         self.network = network
         self.provider = provider
         self.model = model
         self.phase_timeout_s = phase_timeout_s
-        self.pkg_path = pkg_path
         # per-instance key injection first (multi-tenant runs must not share env)
         self.key = key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY", "")
         from proteus.sandbox import DockerSandbox, SandboxConfig
@@ -103,34 +104,37 @@ class PiHarness:
         self._extract_self_code(harness_root / "src")
 
     def _extract_self_code(self, dest: Path) -> None:
-        """Copy pi's own package code out of the image into `dest` (see DshHarness)."""
+        """Unpack the source the image was built from into `dest` (episode-0 state).
+
+        The image bakes a source-only tar at build time precisely so this is cheap and
+        exact: what the seed gets is byte-for-byte the source of the build it boots."""
         if dest.exists() and any(dest.iterdir()):
-            return
+            return                        # resumed root: the seed owns its source already
         dest.mkdir(parents=True, exist_ok=True)
         proc = subprocess.run(
             ["docker", "run", "--rm", "--network", "none",
              "-v", f"{dest}:/proteus-out", "--entrypoint", "sh", self.image,
-             "-c", "cp -r " + " ".join(f"{self.pkg_path}/{p}" for p in SELF_CODE)
-                   + " /proteus-out/"],
+             "-c", f"tar -xf {SOURCE_TAR} -C /proteus-out --strip-components=1"],
             capture_output=True, text=True, errors="replace", check=False)
         if proc.returncode != 0:
             raise RuntimeError(
-                f"could not extract pi self-code from {self.image}: {proc.stderr[-300:]}")
-
-    def _shadow_mounts(self, harness: Path) -> tuple:
-        src = harness / "src"
-        return tuple((str(src / p), f"{self.pkg_path}/{p}")
-                     for p in SELF_CODE if (src / p).exists())
+                f"could not extract pi source from {self.image}: {proc.stderr[-300:]}")
 
     def check_boot(self, harness_root: Path) -> str:
-        """Viability gate: the seed's own code must still print a version (see DshHarness)."""
+        """Viability gate: sync + rebuild + `--version` through the image's boot wrapper.
+
+        Because the wrapper rebuilds from /workspace/src, a type error the agent wrote
+        into its own source surfaces here as a legible build failure (exit 97 with the
+        build log tail), before any API spend."""
         harness = Path(harness_root)
+        state = harness.parent / ".pi-state"
+        state.mkdir(exist_ok=True)
         proc = self.sandbox.run(
-            harness.parent, ["--version"], env={}, timeout_s=60,
-            mounts=((str(harness), "/workspace"),) + self._shadow_mounts(harness))
+            harness.parent, ["--version"], env={}, timeout_s=300,
+            mounts=((str(harness), "/workspace"), (str(state), "/state")))
         if proc.returncode != 0:
-            return (f"self-edited loop does not boot (exit {proc.returncode}): "
-                    f"{(proc.stderr or proc.stdout)[-300:]}")
+            return (f"self-edited source does not boot (exit {proc.returncode}): "
+                    f"{(proc.stderr or proc.stdout)[-400:]}")
         return ""
 
     def install_disposition(self, harness_root: Path, disposition: Disposition) -> None:
@@ -168,8 +172,7 @@ class PiHarness:
                      "-p", spec.phase_prompts.get(phase, phase)],
                     env={"DEEPSEEK_API_KEY": self.key},
                     timeout_s=self.phase_timeout_s,
-                    mounts=((str(harness), "/workspace"), (str(state), "/state"))
-                           + self._shadow_mounts(harness),
+                    mounts=((str(harness), "/workspace"), (str(state), "/state")),
                 )
             except subprocess.TimeoutExpired:
                 error = f"phase {phase}: timeout after {self.phase_timeout_s}s"

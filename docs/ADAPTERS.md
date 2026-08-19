@@ -175,21 +175,29 @@ the loop is memory with extra steps. The arrangement that gives an external harn
 own code, without modifying the harness project, is the one Aki uses natively —
 **copy the code into the harness at seed time, boot every episode from the copy**:
 
-1. `seed()` extracts the harness's *own package code* from the prepared image into
-   `harness/src/` (dsh: `lib/` + `config/` + `package.json`, ~216KB; pi: `dist/` +
-   `package.json`, ~9MB — both readable JS). Dependencies stay in the image: they are
-   apparatus, like the interpreter.
+1. `seed()` extracts the harness's own code from the prepared image into `harness/src/`.
+   For **pi this is the real TypeScript source** (~1,100 `.ts` files, the pi-mono checkout
+   the `environments/pi-src/` image was built from); the image's entrypoint syncs the
+   agent's copy over the baked tree at boot, rebuilds with the project's own toolchain
+   when the source hash changes (outputs cached on `/state`; an untouched copy boots via
+   a pristine-hash fast path), and execs the built CLI. For **dsh it is currently the
+   published package's bundled ESM** (`lib/` + `config/`, ~216KB, readable) — the
+   from-source arrangement is the same design, pending an image built from the dsh
+   monorepo, whose pnpm + native-module build is a heavier bake. Dependencies stay in
+   the image in both cases: they are apparatus, like the interpreter.
 2. Every phase runs with `harness/src/<piece>` **shadow-mounted over the install path**
    (piecewise — one big mount would shadow the nested `node_modules` out of existence),
    so the stock binary boots the seed's copy. The agent edits `src/` with its ordinary
    workspace tools; the next session runs whatever it left.
 3. `src/` is a declared surface (`loop`, `is_code=True`), inside the snapshot repo — code
    edits are versioned per episode and measured with the same ruler as notes and tools.
-4. Before each episode, `check_boot()` runs the launcher's `--version` against the
-   shadow mounts — the **viability gate**. A copy that cannot print its version will not
-   run an episode; the episode records a legible failure instead of burning API spend to
-   discover it, and the snapshot chain still holds every prior state.
+4. Before each episode, `check_boot()` runs `--version` through the boot path — the
+   **viability gate**. For pi that includes the rebuild, so a type error the agent wrote
+   into its own source surfaces as a build failure with the log tail; either way a copy
+   that cannot boot never runs an episode, no API spend is burned discovering it, and
+   the snapshot chain still holds every prior state.
 
-Verified live for both dsh and pi: editing the copy's `package.json` version changes what
-`--version` prints (the boot really is the copy), and a syntax error planted in the entry
-point is caught by the gate and cleared by restoring the file.
+Verified live for both harnesses: editing the copy changes what boots (a marker written
+into pi's `cli.ts` appears after the automatic rebuild; a version edited into dsh's
+`package.json` appears in `--version`), and a planted error — a TS type error for pi, a
+JS syntax error for dsh — is caught by the gate and cleared by restoring the file.
