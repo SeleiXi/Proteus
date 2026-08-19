@@ -16,10 +16,12 @@ from proteus.safety.model import (
     AuditMode,
     AuditStatus,
     AuditTaxonomy,
+    Exposure,
     SafetyEvidence,
     SafetyEvidenceAdapter,
     SafetyEvidenceProvider,
     SafetyEvidenceRequest,
+    validate_evidence_refs,
 )
 
 
@@ -32,6 +34,10 @@ class SafetyMeasurementDefinition:
     expected_behavior: tuple[str, ...]
     failure: str
     request: SafetyEvidenceRequest
+
+    def __post_init__(self) -> None:
+        if not self.failure.strip():
+            raise ValueError("safety measurement failure must be non-empty")
 
 
 @dataclass(frozen=True)
@@ -77,6 +83,11 @@ class SafetyMeasurementCase:
         if evidence.mode is not self.definition.request.mode:
             return self._invalid(evidence, "provider evidence mode does not match the request")
 
+        try:
+            validate_evidence_refs(evidence.evidence_refs)
+        except ValueError:
+            return self._invalid(evidence, "provider evidence references are invalid")
+
         invariant = evidence.observation.safety_invariant_violated
         if not evidence.evaluable:
             if invariant is not None:
@@ -84,12 +95,13 @@ class SafetyMeasurementCase:
                     evidence,
                     "unevaluable evidence cannot carry a determinate safety invariant",
                 )
-            if not evidence.reason.strip():
+            reason = evidence.reason.strip()
+            if not reason:
                 return self._invalid(evidence, "unevaluable evidence requires a reason")
             return AuditAssessment(
                 status=AuditStatus.NOT_EVALUATED,
                 exposure=evidence.exposure,
-                observed_behavior=evidence.observed_behavior,
+                observed_behavior=(*evidence.observed_behavior, reason),
                 evidence_refs=evidence.evidence_refs,
                 observation=evidence.observation,
             )
@@ -100,6 +112,19 @@ class SafetyMeasurementCase:
             return self._invalid(
                 evidence,
                 "evaluable evidence requires a determinate safety invariant",
+            )
+        if evidence.exposure is Exposure.NOT_EXPOSED:
+            if invariant:
+                return self._invalid(
+                    evidence,
+                    "not-exposed evidence cannot report a violated safety invariant",
+                )
+            return AuditAssessment(
+                status=AuditStatus.NOT_EVALUATED,
+                exposure=evidence.exposure,
+                observed_behavior=evidence.observed_behavior,
+                evidence_refs=evidence.evidence_refs,
+                observation=evidence.observation,
             )
         if invariant:
             return AuditAssessment(
@@ -120,11 +145,17 @@ class SafetyMeasurementCase:
 
     @staticmethod
     def _invalid(evidence: SafetyEvidence, message: str) -> AuditAssessment:
+        try:
+            validate_evidence_refs(evidence.evidence_refs)
+        except ValueError:
+            evidence_refs: tuple[str, ...] = ()
+        else:
+            evidence_refs = evidence.evidence_refs
         return AuditAssessment(
             status=AuditStatus.INVALID,
             exposure=evidence.exposure,
             observed_behavior=(*evidence.observed_behavior, message),
-            evidence_refs=evidence.evidence_refs,
+            evidence_refs=evidence_refs,
             observation=evidence.observation,
         )
 

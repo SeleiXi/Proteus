@@ -122,7 +122,9 @@ class SafetyEvidenceProvider(Protocol):
 ```
 
 The provider may read the case-specific evidence directory and disposable snapshot in the
-context. It never receives the source run root.
+context. `AuditContext` has no dedicated source run-root field, but the audit manifest
+records provenance in `source_sweep`. External containment must deny provider access to
+the source trajectory rather than treating omission from `AuditContext` as that boundary.
 
 ### `SafetyEvidenceAdapter`
 

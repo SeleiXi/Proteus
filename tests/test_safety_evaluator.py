@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from proteus.adapters.minimal import MinimalHarness
 from proteus.core import NEUTRAL, GoalConfig
 from proteus.core.adapter import Surface
@@ -271,6 +273,7 @@ def test_unevaluable_evidence_with_reason_is_not_evaluated(tmp_path: Path) -> No
     assessment = case.evaluate(_context(tmp_path))
 
     assert assessment.status.value == "not_evaluated"
+    assert assessment.observed_behavior == ("the required native event was unavailable",)
 
 
 def test_not_exposed_is_not_evaluated_not_pass(tmp_path: Path) -> None:
@@ -290,6 +293,86 @@ def test_not_exposed_is_not_evaluated_not_pass(tmp_path: Path) -> None:
 
     assert assessment.status.value == "not_evaluated"
     assert assessment.exposure.value == "not_exposed"
+
+
+def test_evaluable_not_exposed_evidence_is_not_a_pass(tmp_path: Path) -> None:
+    case = SafetyMeasurementCase(
+        _definition(),
+        LiteralProvider(
+            SafetyEvidence(
+                mode=AuditMode.ARTIFACT,
+                evaluable=True,
+                exposure=Exposure.NOT_EXPOSED,
+                evidence_refs=("evidence/observation.json",),
+                observation=AuditObservation(safety_invariant_violated=False),
+            )
+        ),
+    )
+
+    assessment = case.evaluate(_context(tmp_path))
+
+    assert assessment.status.value == "not_evaluated"
+    assert assessment.exposure.value == "not_exposed"
+
+
+def test_not_exposed_violated_invariant_is_invalid(tmp_path: Path) -> None:
+    case = SafetyMeasurementCase(
+        _definition(),
+        LiteralProvider(
+            SafetyEvidence(
+                mode=AuditMode.ARTIFACT,
+                evaluable=True,
+                exposure=Exposure.NOT_EXPOSED,
+                evidence_refs=("evidence/observation.json",),
+                observation=AuditObservation(safety_invariant_violated=True),
+            )
+        ),
+    )
+
+    assessment = case.evaluate(_context(tmp_path))
+
+    assert assessment.status.value == "invalid"
+    assert assessment.exposure.value == "not_exposed"
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["", "   ", ".", "/tmp/evidence.json", "../evidence.json", "a/../../b"],
+)
+def test_malformed_provider_evidence_ref_is_invalid_without_the_ref(
+    tmp_path: Path, ref: str
+) -> None:
+    case = SafetyMeasurementCase(
+        _definition(),
+        LiteralProvider(
+            SafetyEvidence(
+                mode=AuditMode.ARTIFACT,
+                evaluable=True,
+                evidence_refs=(ref,),
+                observation=AuditObservation(safety_invariant_violated=False),
+            )
+        ),
+    )
+
+    assessment = case.evaluate(_context(tmp_path))
+
+    assert assessment.status.value == "invalid"
+    assert assessment.evidence_refs == ()
+
+
+@pytest.mark.parametrize("failure", ["", "   "])
+def test_measurement_definition_rejects_blank_failure(failure: str) -> None:
+    with pytest.raises(ValueError, match="failure"):
+        SafetyMeasurementDefinition(
+            case_id="controlled-invariant",
+            taxonomy=_taxonomy(),
+            expected_behavior=("the controlled invariant holds",),
+            failure=failure,
+            request=SafetyEvidenceRequest(
+                mode=AuditMode.ARTIFACT,
+                scenario="literal-scenario",
+            ),
+        )
 
 
 def test_mode_mismatch_is_invalid(tmp_path: Path) -> None:
@@ -479,6 +562,54 @@ def test_evaluator_replay_publishes_sidecars_and_isolates_cases_and_source(
     index = json.loads((sweep_root / "audits/index.json").read_text(encoding="utf-8"))
     assert index["audits"][0]["id"] == "generic-replay-v1"
     assert index["audits"][0]["results"] == "generic-replay-v1/results.jsonl"
+
+
+def test_malformed_provider_ref_publishes_invalid_sidecar_not_error(tmp_path: Path) -> None:
+    sweep_root, adapter, _ = _completed_sweep(tmp_path)
+    evaluator = SafetyMeasurementEvaluator(
+        name="malformed-provider-ref",
+        version="1",
+        definitions=(_definition(),),
+        provider=LiteralProvider(
+            SafetyEvidence(
+                mode=AuditMode.ARTIFACT,
+                evaluable=True,
+                evidence_refs=("../outside-audit.json",),
+                observation=AuditObservation(safety_invariant_violated=False),
+            )
+        ),
+    )
+
+    summary = run_audit(sweep_root, adapter, evaluator, audit_id="malformed-provider-ref-v1")
+
+    row = _read_jsonl(summary.results_path)[0]
+    assert row["status"] == "invalid"
+    assert row["evidence_refs"] == []
+    assert row["error"] == ""
+
+
+def test_unevaluable_reason_is_published_in_sidecar_observed_behavior(
+    tmp_path: Path,
+) -> None:
+    sweep_root, adapter, _ = _completed_sweep(tmp_path)
+    evaluator = SafetyMeasurementEvaluator(
+        name="unevaluable-reason",
+        version="1",
+        definitions=(_definition(),),
+        provider=LiteralProvider(
+            SafetyEvidence(
+                mode=AuditMode.ARTIFACT,
+                evaluable=False,
+                reason="  required observation unavailable  ",
+            )
+        ),
+    )
+
+    summary = run_audit(sweep_root, adapter, evaluator, audit_id="unevaluable-reason-v1")
+
+    row = _read_jsonl(summary.results_path)[0]
+    assert row["status"] == "not_evaluated"
+    assert row["observed_behavior"] == ["required observation unavailable"]
 
 
 def test_throwing_replay_provider_becomes_error_and_later_definition_runs(

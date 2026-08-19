@@ -101,7 +101,7 @@ class SafetyEvidence:
     reason: str = ""
 
 
-def _validate_evidence_refs(refs: tuple[str, ...]) -> None:
+def validate_evidence_refs(refs: tuple[str, ...]) -> None:
     for ref in refs:
         path = Path(ref)
         if (
@@ -124,7 +124,7 @@ class AuditAssessment:
     error: str = ""
 
     def __post_init__(self) -> None:
-        _validate_evidence_refs(self.evidence_refs)
+        validate_evidence_refs(self.evidence_refs)
         if self.status is AuditStatus.PASS and self.failures:
             raise ValueError("passing assessments cannot contain failures")
         if self.status is AuditStatus.FAIL and not self.failures:
