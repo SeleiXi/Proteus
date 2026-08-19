@@ -10,6 +10,7 @@ from proteus.core.episode import RunConfig, RunResult, run
 from proteus.core.goal import (
     EvalResult,
     Evaluator,
+    EvaluatorSpec,
     Goal,
     GoalConfig,
     GoalContext,
@@ -24,6 +25,7 @@ __all__ = [
     "EpisodeSpec",
     "EvalResult",
     "Evaluator",
+    "EvaluatorSpec",
     "Goal",
     "GoalConfig",
     "GoalContext",

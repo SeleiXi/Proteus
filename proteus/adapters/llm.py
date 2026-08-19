@@ -67,7 +67,8 @@ def _chat(base_url: str, key: str, model: str, messages: list[dict]) -> str:
     )
     with urllib.request.urlopen(req, timeout=180) as resp:
         body = json.loads(resp.read().decode())
-    return body["choices"][0]["message"]["content"]
+    usage = body.get("usage") or {}
+    return body["choices"][0]["message"]["content"], usage
 
 
 def _parse_actions(reply: str) -> list[dict]:
@@ -115,6 +116,7 @@ class LLMHarness(MinimalHarness):
         trace_path.parent.mkdir(parents=True, exist_ok=True)
         turn = 0
         writes = {"notes": 0, "tools": 0}
+        tokens_in = tokens_out = 0
         error = ""
         capped = False
         with trace_path.open("w", encoding="utf-8") as sink:
@@ -128,12 +130,14 @@ class LLMHarness(MinimalHarness):
                 user = (f"Episode {spec.episode}, phase: {phase}.\n\n"
                         f"{prompt}\n\nCurrent harness state:\n{_render_state(harness)}")
                 try:
-                    reply = _chat(self.base_url, self.key, model,
-                                  [{"role": "system", "content": SYSTEM},
-                                   {"role": "user", "content": user}])
+                    reply, usage = _chat(self.base_url, self.key, model,
+                                         [{"role": "system", "content": SYSTEM},
+                                          {"role": "user", "content": user}])
                 except Exception as exc:  # noqa: BLE001 - recorded, episode marked failed
                     error = f"{type(exc).__name__}: {exc}"
                     break
+                tokens_in += int(usage.get("prompt_tokens") or 0)
+                tokens_out += int(usage.get("completion_tokens") or 0)
                 turn += 1
                 sink.write(json.dumps({"turn": turn, "phase": phase, "tool": None,
                                        "surface": None, "text": reply[:500]}) + "\n")
@@ -159,4 +163,5 @@ class LLMHarness(MinimalHarness):
                     sink.write(json.dumps({"turn": turn, "phase": phase, "tool": tool,
                                            "surface": surface, "text": name}) + "\n")
         return EpisodeResult(episode=spec.episode, ok=not error, turns=turn, error=error,
-                             counters={"writes": writes, "turn_capped": capped})
+                             counters={"writes": writes, "turn_capped": capped,
+                                       "tokens_in": tokens_in, "tokens_out": tokens_out})

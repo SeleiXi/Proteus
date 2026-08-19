@@ -85,6 +85,8 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
     (cfg.root / "manifest.json").write_text(json.dumps({
         "name": cfg.name, "episodes": cfg.episodes,
         "arms": [a.label for a in cfg.arms], "seeds": cfg.seeds, "runs": runs,
+        "goal": cfg.goal.goal_text(),
+        "evaluators": cfg.goal.describe(),
     }, indent=1))
 
     records: list[dict] = []
@@ -121,7 +123,8 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
                 )
                 res = run(rc, start=start)
                 rec = {"arm": arm.label, "seed": s, "root": str(run_root),
-                       "episodes_complete": res.episodes_complete, "error": res.error}
+                       "episodes_complete": res.episodes_complete, "error": res.error,
+                       "counters": res.counters}
                 records.append(rec)
                 sink.write(json.dumps(rec) + "\n")
                 sink.flush()

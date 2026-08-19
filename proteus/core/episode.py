@@ -63,6 +63,9 @@ class RunResult:
     root: str
     error: str = ""
     eval_history: list[dict] = field(default_factory=list)
+    counters: dict = field(default_factory=dict)
+    """Numeric adapter counters summed across episodes (tokens_in/tokens_out where the
+    adapter reports them) — what a cost estimate is built from."""
 
 
 def _phase_prompts(cfg: RunConfig, prior_feedback: str) -> dict[str, str]:
@@ -100,6 +103,7 @@ def _append_progress(cfg: RunConfig, ep: int, res, trace, accepted: bool, result
         "units": {k: len(v) for k, v in units.items()},
         "accepted": accepted,
         "scores": {r.name: r.score for r in results},
+        "counters": dict(res.counters or {}),
     }
     cfg.progress_path.parent.mkdir(parents=True, exist_ok=True)
     with cfg.progress_path.open("a", encoding="utf-8") as sink:
@@ -149,6 +153,7 @@ def run(cfg: RunConfig, start: int = 0) -> RunResult:
     prior_feedback = ""
     error = ""
     done = start
+    totals: dict = {}
     last_accepted = snapshot.head(harness)   # episode-0 state, or the resume point
     best_score: float | None = None
     for ep in range(start + 1, cfg.episodes + 1):
@@ -198,6 +203,9 @@ def run(cfg: RunConfig, start: int = 0) -> RunResult:
             snapshot.restore(harness, last_accepted)
             snapshot.commit(harness, f"episode {ep}: {cfg.name} [rejected]")
         done = ep
+        for key, value in (res.counters or {}).items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                totals[key] = totals.get(key, 0) + value
 
         eval_history.append({"episode": ep, "accepted": accepted,
                              "results": [r.__dict__ for r in results]})
@@ -210,4 +218,4 @@ def run(cfg: RunConfig, start: int = 0) -> RunResult:
 
     (cfg.root / "eval_history.json").write_text(json.dumps(eval_history, indent=1))
     return RunResult(name=cfg.name, episodes_complete=done, root=str(cfg.root),
-                     error=error, eval_history=eval_history)
+                     error=error, eval_history=eval_history, counters=totals)

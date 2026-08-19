@@ -64,3 +64,34 @@ def file_contains(relpath: str, needle: str, name: str = ""):
         return EvalResult(name=label, score=1.0 if ok else 0.0, passed=ok,
                           detail=f"{relpath} {'contains' if ok else 'missing'} target")
     return evaluate
+
+
+def structural_step(surfaces, name: str = "structural-step"):
+    """Measurement evaluator: units added/dropped/revised since the previous episode.
+
+    This is the study's own ruler run between episodes instead of after the sweep — the
+    same per-surface delta `proteus measure --travel` sums, surfaced while the run is
+    live so the tracking page shows movement, and available to the agent under OBSERVE
+    (which is itself an experimental condition: an agent that can see its own structural
+    churn). Reads the run's snapshot chain; episode 1 has no predecessor and scores 0.
+    """
+
+    def evaluate(trace: Sequence[ActionEvent], ctx: GoalContext) -> EvalResult:
+        import tempfile
+
+        from proteus.core import snapshot
+        from proteus.measure import distance
+        root = Path(ctx.harness_root)
+        prev_sha = snapshot.commit_for_episode(root, ctx.episode - 1)
+        if prev_sha is None:
+            return EvalResult(name=name, score=0.0, detail="no previous snapshot")
+        with tempfile.TemporaryDirectory() as tmp:
+            prev = Path(tmp) / "prev"
+            snapshot.materialize(root, prev_sha, prev)
+            deltas = distance.compare(prev, root, surfaces)
+        moved = sum(d.added + d.dropped + d.revised for d in deltas.values())
+        parts = [f"{s}: +{d.added}/-{d.dropped}/~{d.revised}"
+                 for s, d in deltas.items() if d.added or d.dropped or d.revised]
+        return EvalResult(name=name, score=float(moved),
+                          detail="; ".join(parts) or "no structural change")
+    return evaluate

@@ -98,3 +98,73 @@ def test_accept_reject_reverts_worse_episode(tmp_path):
                  if "candidate 2:" in ln), None)
     assert cand is not None
     assert tree(cand) != tree(sha1)          # the discarded work is still inspectable
+
+
+# ------------------------------------------------------- decoupled goal / evaluators
+
+def test_goal_text_and_evaluators_are_independent(tmp_path):
+    from proteus.core import EvaluatorSpec, GoalConfig, Visibility
+    from proteus.core import evaluators as ev
+    from proteus.core.goal import GoalContext
+
+    spec = EvaluatorSpec(name="units:notes", run=ev.surface_units("notes"),
+                         kind="measurement", visibility=Visibility.OBSERVE)
+    cfg = GoalConfig.of(text="Make yourself more robust.", evaluators=(spec,))
+    assert cfg.goal_text() == "Make yourself more robust."
+    assert not cfg.is_no_goal
+
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "a.md").write_text("x\n")
+    results = cfg.evaluate([], GoalContext(str(tmp_path), 1))
+    assert [r.name for r in results] == ["units:notes"]
+    fb = cfg.observe_feedback({r.name: r for r in results})
+    assert "units:notes" in fb                      # OBSERVE reaches the agent
+
+    hidden = GoalConfig.of(text="", evaluators=(
+        EvaluatorSpec(name="units:notes", run=ev.surface_units("notes"),
+                      kind="measurement"),))
+    assert hidden.is_no_goal                        # measured but unstated: still no-goal
+    r = hidden.evaluate([], GoalContext(str(tmp_path), 1))
+    assert hidden.observe_feedback({x.name: x for x in r}) == ""   # HIDDEN never surfaces
+    assert hidden.describe() == [
+        {"name": "units:notes", "kind": "measurement", "visibility": "hidden"}]
+
+
+def test_structural_step_reads_movement_between_episodes(tmp_path):
+    from proteus.core import NEUTRAL, GoalConfig
+    from proteus.core import evaluators as ev
+    from proteus.core.episode import RunConfig, run
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core.goal import EvaluatorSpec
+
+    adapter = MinimalHarness()
+    step = EvaluatorSpec(name="structural-step",
+                         run=ev.structural_step(adapter.surfaces()),
+                         kind="measurement")
+    cfg = RunConfig(name="t", adapter=adapter, disposition=NEUTRAL,
+                    goal=GoalConfig.of(evaluators=(step,)),
+                    root=tmp_path / "r", model="mock", episodes=3, seed=2)
+    res = run(cfg)
+    scores = [r["results"][0]["score"] for r in res.eval_history]
+    assert scores[0] == 0.0, "episode 1 has no predecessor"
+    assert any(s > 0 for s in scores[1:]), "movement between episodes went unmeasured"
+
+
+def test_run_sums_numeric_counters(tmp_path):
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core import NEUTRAL, GoalConfig
+    from proteus.core.adapter import EpisodeResult
+    from proteus.core.episode import RunConfig, run
+
+    class Counting(MinimalHarness):
+        def run_episode(self, spec):
+            res = super().run_episode(spec)
+            return EpisodeResult(episode=res.episode, ok=res.ok, turns=res.turns,
+                                 counters={"tokens_in": 100, "tokens_out": 7,
+                                           "writes": {"notes": 1}})
+
+    cfg = RunConfig(name="t", adapter=Counting(), disposition=NEUTRAL, goal=GoalConfig(),
+                    root=tmp_path / "r", model="mock", episodes=3, seed=1)
+    res = run(cfg)
+    assert res.counters == {"tokens_in": 300, "tokens_out": 21}, \
+        "numeric counters must sum across episodes; nested dicts stay out"

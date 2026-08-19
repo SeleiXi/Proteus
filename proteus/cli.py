@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 from proteus.core.disposition import NEUTRAL, record, review
-from proteus.core.goal import Goal, GoalConfig
+from proteus.core.goal import GoalConfig
 from proteus.sweep import SweepConfig, run_sweep
 
 
@@ -105,22 +105,57 @@ def _arm(spec: str):
     raise SystemExit(f"bad --arm {spec!r} (use neutral | review:<surface> | record:<surface>)")
 
 
-def _goal(spec: str) -> GoalConfig:
-    if spec == "none":
-        return GoalConfig.no_goal()
-    kind, _, text = spec.partition(":")
-    if kind == "task":
-        return GoalConfig.single(Goal(name="task", text=text))
-    raise SystemExit(f"bad --goal {spec!r} (use none | task:<text>)")
+def _goal(spec: str, evaluators) -> GoalConfig:
+    """`--goal` is freeform text ("none" for the no-goal condition); evaluators attach
+    independently via --evaluator. `task:<text>` is accepted for compatibility."""
+    text = "" if spec == "none" else spec.partition(":")[2] if spec.startswith("task:") else spec
+    return GoalConfig.of(text=text, evaluators=evaluators)
+
+
+def _evaluator(spec: str, adapter_factory):
+    """Parse one --evaluator: `<what>[@hidden|@observe]`.
+
+    measurement: units:<surface> | tool-calls | step
+    benchmark/custom: contains:<relpath>:<needle>
+    """
+    from proteus.core import EvaluatorSpec, Visibility
+    from proteus.core import evaluators as ev
+    body, _, vis = spec.partition("@")
+    if vis and vis not in ("hidden", "observe"):
+        raise SystemExit(f"bad --evaluator {spec!r}: visibility is @hidden or @observe")
+    visibility = Visibility(vis) if vis else Visibility.HIDDEN
+    kind, _, arg = body.partition(":")
+    if kind == "units" and arg:
+        return EvaluatorSpec(name=f"units:{arg}", run=ev.surface_units(arg),
+                             kind="measurement", visibility=visibility)
+    if kind == "tool-calls":
+        return EvaluatorSpec(name="tool-calls", run=ev.tool_calls(),
+                             kind="measurement", visibility=visibility)
+    if kind == "step":
+        surfaces = adapter_factory().surfaces()
+        return EvaluatorSpec(name="structural-step", run=ev.structural_step(surfaces),
+                             kind="measurement", visibility=visibility)
+    if kind == "contains":
+        relpath, _, needle = arg.partition(":")
+        if relpath and needle:
+            return EvaluatorSpec(name=f"contains:{relpath}", kind="custom",
+                                 run=ev.file_contains(relpath, needle),
+                                 visibility=visibility)
+    raise SystemExit(
+        f"bad --evaluator {spec!r} "
+        "(use units:<surface> | tool-calls | step | contains:<relpath>:<needle>, "
+        "with optional @hidden/@observe)")
 
 
 def cmd_run(args) -> int:
+    factory = _harness_factory(args)
+    evaluators = tuple(_evaluator(e, factory) for e in (args.evaluator or ()))
     cfg = SweepConfig(
         name=args.out,
-        adapter_factory=_harness_factory(args),
+        adapter_factory=factory,
         arms=[_arm(a) for a in args.arm],
         seeds=args.seeds,
-        goal=_goal(args.goal),
+        goal=_goal(args.goal, evaluators),
         root=Path(args.out).expanduser(),
         model=args.model,
         episodes=args.episodes,
@@ -321,7 +356,15 @@ def main(argv=None) -> int:
     r.add_argument("--harness", default="minimal")
     r.add_argument("--arm", action="append", default=None,
                    help="neutral | review:<surface> | record:<surface> (repeatable)")
-    r.add_argument("--goal", default="none", help="none | task:<text>")
+    r.add_argument("--goal", default="none",
+                   help="freeform objective text shown to the agent, or 'none'. A goal "
+                        "names an aim; --evaluator decides what is measured. If the goal "
+                        "is specific (e.g. a benchmark), attach that benchmark as an "
+                        "evaluator and set it @observe, or the agent cannot pursue it.")
+    r.add_argument("--evaluator", action="append", metavar="SPEC",
+                   help="attach an evaluator, repeatable: units:<surface> | tool-calls | "
+                        "step | contains:<relpath>:<needle>, each with optional "
+                        "@hidden (default) or @observe")
     r.add_argument("--seeds", type=int, default=4)
     r.add_argument("--episodes", type=int, default=10)
     r.add_argument("--max-turns", type=int, default=100)

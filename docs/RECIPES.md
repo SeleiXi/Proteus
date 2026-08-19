@@ -115,3 +115,40 @@ module: the only bridge to the grader is `git diff base_commit` (so the task wor
 be that repo at that commit — `setup` clones it), the upstream cache keys on
 `(run_id, instance_id)` and ignores the patch (so the run id embeds the episode), and every
 distinct instance is another image (so pin a small fixed set).
+
+## Goals and evaluators are separate decisions
+
+What you *tell* the agent and what you *measure* are independent. The goal is freeform
+text; evaluators attach on their own, each with its own visibility:
+
+```bash
+proteus run --harness llm \
+    --goal "Make yourself more robust." \
+    --evaluator units:notes@observe \
+    --evaluator step \
+    --arm neutral --seeds 2 --episodes 10 --out runs/robust
+```
+
+Every evaluator runs to completion between episodes — after episode N ends, before N+1
+starts. `@observe` results are shown to the agent at the start of its next episode;
+`@hidden` (the default) results go only to the run's records — progress lines,
+`eval_history.json`, and the tracking page — so the user always sees everything, and the
+agent sees exactly what the condition says it may.
+
+Two families of evaluator, because they answer different questions:
+
+- **measurement** — the study's own instruments: `units:<surface>` (what has been built),
+  `step` (structural movement since the previous episode), `tool-calls`. Cheap, intrinsic,
+  defined for every harness; a no-goal run is read entirely with these. Crystallization
+  stays a sweep-level probe rather than a per-episode evaluator: one administration is a
+  full LLM episode, so it is run at checkpoints, not between every pair of episodes.
+- **benchmark** — external ground truth: the local task pack (`proteus.bench.local`),
+  SWE-bench (`proteus.bench.swe`). Attach via the Python API (`as_goal(task, ...)`), which
+  also seeds the task into the workspace.
+
+A general goal ("more robust") needs no benchmark — the measurement evaluators will show
+what the harness did with the words. **A specific goal must come with its measure**: if
+the goal says "optimize SWE-bench", then SWE-bench must actually be attached as an
+evaluator and set `@observe`. A specific goal with no visible measure gives the agent an
+objective it can neither pursue nor verify, and what you get is drift toward whatever the
+text connotes rather than optimization of anything.

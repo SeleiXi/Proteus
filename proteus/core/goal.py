@@ -50,11 +50,43 @@ Evaluator = Callable[[Sequence[ActionEvent], "GoalContext"], EvalResult]
 class Goal:
     """One objective. `text` is shown to the agent (in the act phase); `evaluator` scores
     progress toward it. A goal with no evaluator is a stated aim with no measured feedback;
-    an evaluator with no goal text is a measured signal with no announced objective."""
+    an evaluator with no goal text is a measured signal with no announced objective.
+
+    Retained for compatibility; the decoupled form is `GoalConfig(text=..., evaluators=...)`
+    below, where the objective is freeform text and evaluators are their own first-class
+    list. Coupling them turned out to be the wrong default: what you *tell* the agent and
+    what you *measure* are independent decisions, and the interesting conditions are
+    exactly the ones where they differ."""
 
     name: str
     text: str = ""
     evaluator: Evaluator | None = None
+    visibility: Visibility = Visibility.HIDDEN
+
+
+@dataclass(frozen=True)
+class EvaluatorSpec:
+    """One evaluator attached to a run, independent of the goal text.
+
+    `kind` says where the signal comes from, because the two families answer different
+    questions and are read differently:
+
+      - "measurement" — the study's own instruments (structural distance, unit counts,
+        behavioural statistics). Cheap, intrinsic, defined for every harness; these are
+        what a no-goal run is read with.
+      - "benchmark"   — an external ground truth (a local task pack, SWE-bench, a CI
+        suite). Costs real compute, exists only where a task does, and is the thing a
+        *specific* goal must be wired to (see `GoalConfig`).
+      - "custom"      — anything else the user supplies.
+
+    `visibility` is per evaluator: OBSERVE results are shown to the agent at the start of
+    its next episode; HIDDEN results go only to the run's records (progress lines,
+    eval_history, the tracking page) — the user always sees both.
+    """
+
+    name: str
+    run: Evaluator
+    kind: str = "custom"                       # "measurement" | "benchmark" | "custom"
     visibility: Visibility = Visibility.HIDDEN
 
 
@@ -70,6 +102,18 @@ class GoalContext:
 class GoalConfig:
     """The full goal/evaluator condition for a run.
 
+    The goal and the evaluators are decoupled. `text` is freeform — "make yourself more
+    robust" is a legitimate objective — and `evaluators` is whatever the user wants
+    measured between episodes, each with its own visibility. Every evaluator runs to
+    completion after episode N ends and before episode N+1 starts; OBSERVE results reach
+    the agent in its next observe phase, HIDDEN results reach only the run's records.
+
+    One warning belongs to the user, not the framework, because no code can check it: if
+    the goal text is *specific* — "optimize SWE-bench" — then that benchmark must actually
+    be attached as an evaluator and set OBSERVE. A specific goal with no visible measure
+    of it gives the agent an objective it can neither pursue nor verify, and what you get
+    is drift toward whatever the text connotes rather than optimization of anything.
+
     Presets cover the paper's conditions:
       - `GoalConfig.no_goal()`            → N0: no goal, no evaluator, no feedback.
       - `GoalConfig.single(goal, hidden)` → G-blind: one goal, offline agent-blind score.
@@ -80,6 +124,10 @@ class GoalConfig:
 
     goals: tuple[Goal, ...] = ()
     selection: str = "none"            # "none" | "accept_reject" | "rank"
+    text: str = ""
+    """The freeform objective, decoupled from measurement. Shown in the act phase."""
+    evaluators: tuple[EvaluatorSpec, ...] = ()
+    """Evaluators attached to this run, each with its own kind and visibility."""
 
     @staticmethod
     def no_goal() -> "GoalConfig":
@@ -93,13 +141,21 @@ class GoalConfig:
     def multi(goals: Sequence[Goal], *, selection: str = "none") -> "GoalConfig":
         return GoalConfig(goals=tuple(goals), selection=selection)
 
+    @staticmethod
+    def of(text: str = "", evaluators: Sequence[EvaluatorSpec] = (),
+           *, selection: str = "none") -> "GoalConfig":
+        """The decoupled form: freeform objective text + independent evaluators."""
+        return GoalConfig(text=text, evaluators=tuple(evaluators), selection=selection)
+
     @property
     def is_no_goal(self) -> bool:
-        return len(self.goals) == 0
+        """No announced objective. Evaluators may still run — measured but unstated is a
+        real condition (G-blind); unmeasured but stated is another (an aim on trust)."""
+        return not self.goals and not self.text
 
     def goal_text(self) -> str:
         """Objective text to show the agent in the act phase (empty under no-goal)."""
-        stated = [g.text for g in self.goals if g.text]
+        stated = ([self.text] if self.text else []) + [g.text for g in self.goals if g.text]
         if not stated:
             return ""
         if len(stated) == 1:
@@ -113,18 +169,41 @@ class GoalConfig:
         for g in self.goals:
             if g.evaluator is not None:
                 out.append(g.evaluator(trace, ctx))
+        for spec in self.evaluators:
+            r = spec.run(trace, ctx)
+            if r.name != spec.name:
+                # the spec's name is the identity everything downstream keys on (feedback,
+                # progress lines, selection); the callable's own label is advisory
+                r = EvalResult(name=spec.name, score=r.score, passed=r.passed,
+                               detail=r.detail)
+            out.append(r)
         return out
 
+    def _visible(self) -> list[tuple[str, str]]:
+        """(name, label) of every OBSERVE-visible signal."""
+        vis = [(g.name, g.name) for g in self.goals if g.visibility is Visibility.OBSERVE]
+        vis += [(s.name, s.name) for s in self.evaluators
+                if s.visibility is Visibility.OBSERVE]
+        return vis
+
     def observe_feedback(self, results: Mapping[str, EvalResult]) -> str:
-        """The text shown to the agent in the next observe phase, for OBSERVE-visible goals
-        only. HIDDEN-visibility scores never appear here."""
+        """The text shown to the agent in the next observe phase, for OBSERVE-visible
+        signals only. HIDDEN-visibility scores never appear here."""
         lines = []
-        for g in self.goals:
-            if g.visibility is Visibility.OBSERVE and g.name in results:
-                r = results[g.name]
-                lines.append(f"- {g.name}: score {r.score:.3f}"
+        for name, label in self._visible():
+            if name in results:
+                r = results[name]
+                lines.append(f"- {label}: score {r.score:.3f}"
                              + (f" — {r.detail}" if r.detail else ""))
         if not lines:
             return ""
         return ("Feedback on your last episode from the evaluators you can see:\n"
                 + "\n".join(lines))
+
+    def describe(self) -> list[dict]:
+        """Evaluator manifest rows (name, kind, visibility) for the run's records."""
+        rows = [{"name": g.name, "kind": "goal", "visibility": g.visibility.value}
+                for g in self.goals if g.evaluator is not None]
+        rows += [{"name": s.name, "kind": s.kind, "visibility": s.visibility.value}
+                 for s in self.evaluators]
+        return rows
