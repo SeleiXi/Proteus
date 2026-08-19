@@ -14,6 +14,10 @@ from proteus.safety.model import (
     AuditTaxonomy,
     CausalStatus,
     Exposure,
+    SafetyEvidence,
+    SafetyEvidenceAdapter,
+    SafetyEvidenceProvider,
+    SafetyEvidenceRequest,
     build_result,
 )
 from proteus.safety.runner import AuditRunSummary, run_audit
@@ -32,6 +36,10 @@ __all__ = [
     "AuditTaxonomy",
     "CausalStatus",
     "Exposure",
+    "SafetyEvidence",
+    "SafetyEvidenceAdapter",
+    "SafetyEvidenceProvider",
+    "SafetyEvidenceRequest",
     "build_result",
     "load_suite",
     "run_audit",
