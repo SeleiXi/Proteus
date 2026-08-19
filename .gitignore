@@ -7,3 +7,6 @@ __pycache__/
 runs/
 *.jsonl
 .DS_Store
+
+
+AGENTS.md
