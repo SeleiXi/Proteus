@@ -19,8 +19,11 @@ class FakeSandbox:
         self.boot_rc = boot_rc
         self.calls = []
 
-    def run(self, run_root, command, env, timeout_s, mounts=()):
-        self.calls.append({"command": command, "mounts": mounts})
+    def run(self, run_root, command, env, timeout_s, mounts=(), stop_check=None):
+        self.calls.append({"command": command, "mounts": mounts,
+                           "stop_check": stop_check})
+        if command != ["--version"] and stop_check is not None and stop_check():
+            return subprocess.CompletedProcess(command, 137, "", "killed")
         rc = self.boot_rc if command == ["--version"] else 0
         return subprocess.CompletedProcess(command, rc, "ok", "boom" if rc else "")
 
@@ -93,3 +96,76 @@ def test_reseeding_never_overwrites_evolved_code(tmp_path):
     # the real guard lives in _extract_self_code itself: non-empty src is left alone
     real._extract_self_code(h / "src")
     assert (h / "src" / "lib" / "code.js").read_text() == "// evolved by the agent\n"
+
+
+# ------------------------------------------------------------------- turn budget
+
+def test_budget_stops_new_phases_exactly(tmp_path):
+    # the between-phase check is exact and needs nothing from the log format
+    from proteus.core.adapter import EpisodeSpec
+    for i, cls in enumerate((DshHarness, PiHarness)):
+        sandbox = FakeSandbox()
+        a = cls(key="x", sandbox=sandbox)
+        a._live_calls = lambda *args, **kw: 99          # already over budget
+        h = tmp_path / f"h{i}"
+        _seed_with_fake_src(a, h, ())
+        root = tmp_path / f"r{i}"
+        root.mkdir()
+        (root / "harness").symlink_to(h)
+        res = a.run_episode(EpisodeSpec(root=root, episode=1, model="m",
+                                        phase_prompts={}, max_turns=10))
+        assert res.ok and not res.error, cls.__name__
+        assert res.counters["turn_capped"], cls.__name__
+        phases = [c for c in sandbox.calls if c["command"] != ["--version"]]
+        assert phases == [], f"{cls.__name__}: a phase ran past the budget"
+
+
+def test_budget_kill_mid_phase_is_a_cap_not_an_error(tmp_path):
+    from proteus.core.adapter import EpisodeSpec
+    for i, cls in enumerate((DshHarness, PiHarness)):
+        sandbox = FakeSandbox()
+        a = cls(key="x", sandbox=sandbox)
+        calls = iter([0, 50])                            # under budget at launch, over mid-phase
+        a._live_calls = lambda *args, **kw: next(calls, 50)
+        h = tmp_path / f"h{i}"
+        _seed_with_fake_src(a, h, ())
+        root = tmp_path / f"r{i}"
+        root.mkdir()
+        (root / "harness").symlink_to(h)
+        res = a.run_episode(EpisodeSpec(root=root, episode=1, model="m",
+                                        phase_prompts={}, max_turns=10))
+        assert res.ok and not res.error, \
+            f"{cls.__name__}: a budget kill must be a cap, got error={res.error!r}"
+        assert res.counters["turn_capped"], cls.__name__
+        phases = [c for c in sandbox.calls if c["command"] != ["--version"]]
+        assert len(phases) == 1, f"{cls.__name__}: phases continued after the kill"
+
+
+def test_no_budget_means_no_watching(tmp_path):
+    from proteus.core.adapter import EpisodeSpec
+    sandbox = FakeSandbox()
+    a = PiHarness(key="x", sandbox=sandbox)
+    h = tmp_path / "h"
+    _seed_with_fake_src(a, h, ())
+    root = tmp_path / "r"
+    root.mkdir()
+    (root / "harness").symlink_to(h)
+    a.run_episode(EpisodeSpec(root=root, episode=1, model="m", phase_prompts={},
+                              max_turns=0))
+    phases = [c for c in sandbox.calls if c["command"] != ["--version"]]
+    assert phases and all(c["stop_check"] is None for c in phases)
+
+
+def test_announced_budget_reaches_every_phase_prompt(tmp_path):
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core import NEUTRAL, GoalConfig
+    from proteus.core.episode import PHASES, RunConfig, _phase_prompts
+    on = RunConfig(name="t", adapter=MinimalHarness(), disposition=NEUTRAL,
+                   goal=GoalConfig(), root=tmp_path, model="mock", max_turns=12,
+                   announce_budget=True)
+    p = _phase_prompts(on, "")
+    assert all("at most 12 tool calls" in p[ph] for ph in PHASES)
+    off = RunConfig(name="t", adapter=MinimalHarness(), disposition=NEUTRAL,
+                    goal=GoalConfig(), root=tmp_path, model="mock", max_turns=12)
+    q = _phase_prompts(off, "")
+    assert all("tool calls in this episode" not in q[ph] for ph in PHASES)

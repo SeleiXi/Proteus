@@ -66,9 +66,16 @@ adapter's:
   episode;
 - **dsh / pi** (external CLI): each phase boots a **fresh container** and hands the
   stock CLI that phase's prompt as its task; the workspace mounts at `/workspace`, the
-  harness's own state at `/state`; self-edited code takes effect via shadow mounts (dsh)
-  or the rebuild-on-boot wrapper (pi); `max_turns` cannot be enforced — the CLI owns its
-  loop — so `phase_timeout_s` bounds cost instead;
+  harness's own state at `/state`; self-edited code takes effect via the rebuild-on-boot
+  wrapper. `max_turns` is enforced in two layers, both harness-agnostic: **exactly
+  between phases** (no new phase once the budget is spent) and **approximately
+  mid-phase** (the session log is polled live — pi's is plain JSONL, dsh's flushes one
+  zstd frame per event — and the container is stopped when the count crosses the
+  budget). A budget stop records `turn_capped`, not an error: files already written
+  persist, the episode snapshots normally, the run continues. `phase_timeout_s` remains
+  the wall-clock backstop. With `announce_budget`, the agent is also *told* its budget
+  in every phase prompt, so it can plan within it — off by default, because announcing
+  changes behaviour, and recorded in the manifest;
 - **aki**: delegates the episode to Aki's own supervisor.
 
 An exception or `res.ok == False` is recorded and ends the trajectory — a record, not a
@@ -166,7 +173,7 @@ working tree the snapshot describes.
 | trace source | own JSONL | own JSONL | `session.jsonl.zstd` | session JSONL | Aki tracer |
 | disposition carrier | JSON file | JSON file | `AGENTS.md` block | `AGENTS.md` block | apparatus-native |
 | self-code | none | none | bundled ESM (shadow mounts) | **real TS source (rebuild on boot)** | `loop.py` + package copy |
-| iteration bound | `max_turns`, hard | `max_turns`, hard | `phase_timeout_s` | `phase_timeout_s` | apparatus turn gate |
+| iteration bound | `max_turns`, hard | `max_turns`, hard | `max_turns`: exact between phases + mid-phase log watch | `max_turns`: exact between phases + mid-phase log watch | apparatus turn gate |
 | needs | nothing | API key | Docker + key | Docker + key | the private Aki repo |
 
 ## Failure paths

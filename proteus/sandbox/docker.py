@@ -16,7 +16,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Mapping, Protocol
+from typing import Callable, Mapping, Protocol
 
 
 @dataclass(frozen=True)
@@ -99,8 +99,12 @@ class SandboxConfig:
 
 class Sandbox(Protocol):
     def run(self, run_root: Path, command: list[str], env: Mapping[str, str],
-            timeout_s: int, mounts: tuple[tuple[str, str], ...] = ()
+            timeout_s: int, mounts: tuple[tuple[str, str], ...] = (),
+            stop_check: "Callable[[], bool] | None" = None,
             ) -> subprocess.CompletedProcess:
+        """`stop_check`, when given, is polled while the command runs; returning True
+        stops the container. The caller owns the semantics of a stop (a turn budget is
+        a cap, not an error)."""
         ...
 
 
@@ -108,7 +112,8 @@ class LocalSandbox:
     """No isolation — runs the command as a plain subprocess. For trusted harnesses only."""
 
     def run(self, run_root: Path, command: list[str], env: Mapping[str, str],
-            timeout_s: int, mounts: tuple[tuple[str, str], ...] = ()
+            timeout_s: int, mounts: tuple[tuple[str, str], ...] = (),
+            stop_check=None,   # in-process harnesses enforce budgets natively; unused here
             ) -> subprocess.CompletedProcess:
         return subprocess.run(command, capture_output=True, text=True, cwd=str(run_root),
                               env={**dict(env)}, timeout=timeout_s, check=False)
@@ -127,12 +132,23 @@ class DockerSandbox:
         self.config = config
 
     def run(self, run_root: Path, command: list[str], env: Mapping[str, str],
-            timeout_s: int, mounts: tuple[tuple[str, str], ...] = ()
+            timeout_s: int, mounts: tuple[tuple[str, str], ...] = (),
+            stop_check=None, poll_s: float = 2.0,
             ) -> subprocess.CompletedProcess:
         """`mounts` replaces the default `<run_root>:/run` bind when given — adapters with
-        their own container layout (e.g. dsh's /workspace + /state) pass it per call."""
+        their own container layout (e.g. dsh's /workspace + /state) pass it per call.
+
+        With `stop_check`, the container runs named and is polled every `poll_s`; when
+        the callable returns True the container is killed and the process's own exit
+        code is returned — the caller decides whether that stop was a cap or a failure.
+        """
         c = self.config
         argv = ["docker", "run", "--rm", "--init", "--network", c.network]
+        name = ""
+        if stop_check is not None:
+            import uuid
+            name = f"proteus-{uuid.uuid4().hex[:12]}"
+            argv += ["--name", name]
         for host, cont in (mounts or ((str(run_root), "/run"),)):
             argv += ["-v", f"{host}:{cont}"]
         if c.mem_limit:
@@ -151,5 +167,26 @@ class DockerSandbox:
         for key, value in c.env.items():
             argv += ["-e", f"{key}={value}"]
         argv += [*c.extra_args, c.image, *(c.entrypoint or ()), *command]
-        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s,
-                              check=False)
+        if stop_check is None:
+            return subprocess.run(argv, capture_output=True, text=True, errors="replace",
+                                  timeout=timeout_s, check=False)
+
+        import time
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, errors="replace")
+        deadline = time.monotonic() + timeout_s
+        stopped = False
+        while True:
+            try:
+                out, err = proc.communicate(timeout=poll_s)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            if time.monotonic() > deadline:
+                subprocess.run(["docker", "kill", name], capture_output=True, check=False)
+                out, err = proc.communicate()
+                raise subprocess.TimeoutExpired(argv, timeout_s, output=out, stderr=err)
+            if not stopped and stop_check():
+                stopped = True
+                subprocess.run(["docker", "kill", name], capture_output=True, check=False)
+        return subprocess.CompletedProcess(argv, proc.returncode, out, err)

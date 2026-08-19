@@ -160,6 +160,7 @@ def cmd_run(args) -> int:
         model=args.model,
         episodes=args.episodes,
         max_turns=args.max_turns,
+        announce_budget=args.announce_budget,
         on_existing=args.on_existing,
     )
     try:
@@ -368,6 +369,9 @@ def main(argv=None) -> int:
     r.add_argument("--seeds", type=int, default=4)
     r.add_argument("--episodes", type=int, default=10)
     r.add_argument("--max-turns", type=int, default=100)
+    r.add_argument("--announce-budget", action="store_true",
+                   help="tell the agent its per-episode tool-call budget in every phase "
+                        "prompt (recorded in the manifest; announcing changes behaviour)")
     r.add_argument("--phase-timeout", type=int, default=0, metavar="S",
                    help="wall-clock limit per phase for containerised harnesses "
                         "(default: the adapter's own, 600s)")

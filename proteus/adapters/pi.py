@@ -160,10 +160,27 @@ class PiHarness:
         (run_root / "traces").mkdir(exist_ok=True)
         mapping: dict[str, str] = {}
         error = ""
+        capped = False
+        budget = int(spec.max_turns or 0)
+        episode_files: set = set()
         if (harness / "src").is_dir():
             error = self.check_boot(harness)
         for phase in PHASES if not error else ():
+            # budget enforcement, both layers (see DshHarness.run_episode): exact between
+            # phases, approximate mid-phase via the live session log
+            if budget and self._live_calls(state, episode_files, set()) >= budget:
+                capped = True
+                break
             before = self._sessions(state)
+            fired = [False]
+
+            def stop_check(before=before, fired=fired):
+                if self._live_calls(state, episode_files,
+                                    self._sessions(state) - before) >= budget:
+                    fired[0] = True
+                    return True
+                return False
+
             try:
                 proc = self.sandbox.run(
                     run_root,
@@ -173,24 +190,44 @@ class PiHarness:
                     env={"DEEPSEEK_API_KEY": self.key},
                     timeout_s=self.phase_timeout_s,
                     mounts=((str(harness), "/workspace"), (str(state), "/state")),
+                    stop_check=stop_check if budget else None,
                 )
             except subprocess.TimeoutExpired:
                 error = f"phase {phase}: timeout after {self.phase_timeout_s}s"
                 break
-            if proc.returncode != 0:
-                error = f"phase {phase}: exit {proc.returncode}: {proc.stderr[-400:]}"
-                break
             new = self._sessions(state) - before
             if new:
                 mapping[phase] = min(new).name
+                episode_files |= new
+            if proc.returncode != 0:
+                if fired[0]:
+                    capped = True      # stopped by the budget: a cap, not a failure
+                    break
+                error = f"phase {phase}: exit {proc.returncode}: {proc.stderr[-400:]}"
+                break
         (run_root / "traces" / f"ep{spec.episode:03d}.json").write_text(
             json.dumps(mapping, indent=1))
         trace = self.read_trace(run_root, spec.episode)
         return EpisodeResult(
             episode=spec.episode, ok=not error,
             turns=sum(1 for e in trace if e.tool), error=error,
-            counters={"phases": len(mapping)},
+            counters={"phases": len(mapping), "turn_capped": capped},
         )
+
+    def _live_calls(self, state: Path, episode_files: set, extra: set) -> int:
+        """Tool calls made so far this episode, read live from the session logs.
+
+        pi's session JSONL is plain text and appended per event, so a mid-phase read
+        sees every call already made. Counted by marker substring — over-counting stops
+        early, which is the conservative direction for a budget."""
+        n = 0
+        for f in set(episode_files) | set(extra):
+            path = Path(f) if isinstance(f, Path) else state / f
+            try:
+                n += path.read_text(encoding="utf-8", errors="replace").count('"toolCall"')
+            except OSError:
+                continue
+        return n
 
     # ------------------------------------------------------------------ measure path
 

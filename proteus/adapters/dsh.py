@@ -60,6 +60,33 @@ Each session is one phase of an episode; only these files carry over.
 """
 
 
+def _zstd_partial(data: bytes) -> bytes:
+    """Decode the complete leading frames of a possibly-truncated zstd stream.
+
+    dsh flushes its session log one frame per event, so a file read mid-write ends in a
+    partial frame; everything before it decodes cleanly. This is what makes a live turn
+    count possible while a phase is still running. Returns what could be decoded; any
+    failure (including no zstd support on this interpreter) returns what it has."""
+    out = b""
+    rest = data
+    try:
+        try:
+            from compression import zstd as _z  # Python 3.14+
+            mk = _z.ZstdDecompressor
+        except ImportError:
+            import zstandard as _z
+            mk = lambda: _z.ZstdDecompressor().decompressobj()  # noqa: E731
+        while rest:
+            d = mk()
+            out += d.decompress(rest)
+            rest = getattr(d, "unused_data", b"")
+            if not rest:
+                break
+    except Exception:  # noqa: BLE001 - a partial tail frame is expected, not an error
+        pass
+    return out
+
+
 def _zstd_decompress(data: bytes) -> bytes:
     try:
         from compression import zstd  # Python 3.14+
@@ -179,10 +206,28 @@ class DshHarness:
         (run_root / "traces").mkdir(exist_ok=True)
         mapping: dict[str, str] = {}
         error = ""
+        capped = False
+        budget = int(spec.max_turns or 0)
+        episode_dirs: set = set()
         if (harness / "src").is_dir():
             error = self.check_boot(harness)
         for phase in PHASES if not error else ():
+            # the budget is enforced twice, both harness-agnostically: exactly, between
+            # phases (no new phase once it is spent) and approximately, mid-phase (the
+            # session log is polled and the container stopped when the count crosses it)
+            if budget and self._live_calls(state, episode_dirs, set()) >= budget:
+                capped = True
+                break
             before = self._session_dirs(state)
+            fired = [False]
+
+            def stop_check(before=before, fired=fired):
+                if self._live_calls(state, episode_dirs, 
+                                    self._session_dirs(state) - before) >= budget:
+                    fired[0] = True
+                    return True
+                return False
+
             try:
                 proc = self.sandbox.run(
                     run_root,
@@ -191,24 +236,42 @@ class DshHarness:
                          "DSH_PERMISSION_MODE": "workspace-write"},
                     timeout_s=self.phase_timeout_s,
                     mounts=((str(harness), "/workspace"), (str(state), "/state")),
+                    stop_check=stop_check if budget else None,
                 )
             except subprocess.TimeoutExpired:
                 error = f"phase {phase}: timeout after {self.phase_timeout_s}s"
                 break
-            if proc.returncode != 0:
-                error = f"phase {phase}: exit {proc.returncode}: {proc.stderr[-400:]}"
-                break
             new = self._session_dirs(state) - before
             if new:
                 mapping[phase] = str(min(new).relative_to(state))
+                episode_dirs |= new
+            if proc.returncode != 0:
+                if fired[0]:
+                    capped = True      # stopped by the budget: a cap, not a failure
+                    break
+                error = f"phase {phase}: exit {proc.returncode}: {proc.stderr[-400:]}"
+                break
         (run_root / "traces" / f"ep{spec.episode:03d}.json").write_text(
             json.dumps(mapping, indent=1))
         trace = self.read_trace(run_root, spec.episode)
         return EpisodeResult(
             episode=spec.episode, ok=not error,
             turns=sum(1 for e in trace if e.tool), error=error,
-            counters={"phases": len(mapping)},
+            counters={"phases": len(mapping), "turn_capped": capped},
         )
+
+    def _live_calls(self, state: Path, episode_dirs: set, extra: set) -> int:
+        """Tool calls made so far this episode, read live from the session logs."""
+        n = 0
+        for d in set(episode_dirs) | set(extra):
+            log = Path(d) if isinstance(d, Path) else state / d
+            f = log / "session.jsonl.zstd"
+            if f.exists():
+                try:
+                    n += _zstd_partial(f.read_bytes()).count(b'"tool/call"')
+                except OSError:
+                    continue
+        return n
 
     # ------------------------------------------------------------------ measure path
 

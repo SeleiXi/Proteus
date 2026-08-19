@@ -50,6 +50,13 @@ class RunConfig:
     """A `proteus.bench.BenchTask` to seed into the harness before episode 1, for
     goal-conditioned runs. The task workspace lives inside the harness workspace so no
     adapter needs to know about it."""
+    announce_budget: bool = False
+    """Tell the agent its per-episode budget (`max_turns`) in every phase prompt, so it
+    can plan within it. Off by default: announcing the budget changes behaviour — that is
+    the point — so it is an experimental condition, recorded in the manifest, not a
+    silent default. Enforcement is separate and always on where possible: hard cap for
+    in-process harnesses, between-phase budget checks and mid-phase log watching for
+    containerized ones."""
     progress_path: Path | None = None
     """Where to append one JSON line per finished episode (live tracking). Must live
     OUTSIDE `root`: the subject agent can read its own run root, and a progress record
@@ -79,6 +86,12 @@ def _phase_prompts(cfg: RunConfig, prior_feedback: str) -> dict[str, str]:
     # evaluator feedback the agent is allowed to see enters the observe phase
     if prior_feedback:
         prompts["observe"] = f"{prior_feedback}\n\n{prompts['observe']}"
+    # the budget announcement comes first: it frames how the agent plans the episode
+    if cfg.announce_budget and cfg.max_turns:
+        note = (f"Budget: you have at most {cfg.max_turns} tool calls in this episode, "
+                "across all phases. Plan within it; the episode ends when it is spent.")
+        for ph in PHASES:
+            prompts[ph] = f"{note}\n\n{prompts[ph]}"
     # the disposition contributes its (per-phase) text — unless the adapter already carries
     # it in a file the harness loads itself, in which case adding it here would deliver the
     # same perturbation twice per phase (see HarnessAdapter.disposition_in_files)
