@@ -72,12 +72,25 @@ def _grade(ws: Path, inst: dict[str, Any], episode_tag: str) -> EvalResult:
                           detail=f"grading deps missing ({exc}); "
                                  "pip install swebench datasets docker")
 
-    spec = make_test_spec(inst)
-    pred = {"instance_id": inst["instance_id"], "model_name_or_path": "proteus",
-            "model_patch": diff}
-    result = run_instance(spec, pred, docker.from_env(),
-                          run_id=f"proteus-{episode_tag}",   # never reuse: see module doc
-                          timeout=GRADE_TIMEOUT_S)
+    # the whole grade is guarded: run_instance's positional signature has drifted across
+    # swebench majors, and this path has not been executed against an installed swebench
+    # (it needs x86_64 + ~120GB). A signature mismatch or container error must degrade to
+    # a scored zero with a legible message, never crash the trajectory.
+    try:
+        spec = make_test_spec(inst)
+        pred = {"instance_id": inst["instance_id"], "model_name_or_path": "proteus",
+                "model_patch": diff}
+        result = run_instance(
+            test_spec=spec, pred=pred, client=docker.from_env(),
+            run_id=f"proteus-{episode_tag}",   # never reuse: see module doc
+            timeout=GRADE_TIMEOUT_S)
+    except TypeError as exc:
+        return EvalResult(name=name, score=0.0, passed=False,
+                          detail=f"swebench run_instance signature mismatch ({exc}); "
+                                 "pin a supported swebench and adjust proteus/bench/swe.py")
+    except Exception as exc:  # noqa: BLE001 - container/build failure is a zero, not a crash
+        return EvalResult(name=name, score=0.0, passed=False,
+                          detail=f"grading error: {type(exc).__name__}: {exc}"[:200])
     if not result:
         return EvalResult(name=name, score=0.0, passed=False,
                           detail="patch did not apply, or the harness errored")

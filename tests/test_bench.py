@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from proteus.adapters.minimal import MinimalHarness
-from proteus.bench import as_goal, seed_task, task_root, workspace_diff
+from proteus.bench import as_goal, task_root, workspace_diff
 from proteus.bench.local import TASKS, local_task
 from proteus.core import NEUTRAL, Visibility
 from proteus.core.episode import RunConfig, run
@@ -37,15 +37,34 @@ def test_grader_rewards_a_fix(tmp_path):
 
 
 def test_diff_shows_only_the_agents_edit(tmp_path):
-    task = local_task("local:token-budget")
+    # workspace_diff is the SWE-path bridge (a real git checkout); the local pack has no
+    # git of its own (a nested .git would gitlink into the snapshot repo), so exercise the
+    # diff against a plain committed repo
+    import subprocess
+    ws = tmp_path / "repo"
+    ws.mkdir()
+    (ws / "solution.py").write_text("def f():\n    return 0\n")
+    (ws / "tests.py").write_text("from solution import f\n\ndef test_f():\n    assert f() == 1\n")
+    for c in (["init", "-q"], ["add", "-A"],
+              ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "seed"]):
+        subprocess.run(["git", "-C", str(ws), *c], check=True, capture_output=True)
+    assert workspace_diff(ws).strip() == ""      # nothing changed yet
+    (ws / "solution.py").write_text("def f():\n    return 1\n")
+    diff = workspace_diff(ws)
+    assert "solution.py" in diff and "return 1" in diff
+    assert "tests.py" not in diff
+
+
+def test_local_grader_ignores_edited_tests(tmp_path):
+    # editing tests.py must not raise the score: the grader restores held-out tests
+    task = local_task("local:interval-merge")
     ws = tmp_path / "task"
     ws.mkdir()
     task.setup(ws)
-    assert workspace_diff(ws).strip() == ""      # nothing changed yet
-    (ws / "solution.py").write_text("# rewritten\n")
-    diff = workspace_diff(ws)
-    assert "solution.py" in diff and "# rewritten" in diff
-    assert "tests.py" not in diff
+    (ws / "tests.py").write_text(
+        "def test_trivial():\n    assert True\n")      # agent tries to game it
+    r = task.grade(ws)
+    assert not r.passed and r.score < 1.0              # real tests were restored
 
 
 def test_goal_conditioned_run_seeds_and_scores(tmp_path):

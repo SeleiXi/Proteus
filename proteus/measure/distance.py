@@ -38,6 +38,13 @@ def units(harness_root: Path, surfaces: Sequence[Surface]) -> dict[str, dict[str
     out: dict[str, dict[str, str]] = {s.name: {} for s in surfaces}
     for s in surfaces:
         base = harness_root / s.subdir
+        if base.is_file():
+            # a surface whose subdir is a single file (a self-edited code file such as
+            # loop.py, or an instructions file such as AGENTS.md). Skipping these was a
+            # measurement bug: they are exactly the self-editing surfaces the study is
+            # about, and they would have read distance 0 forever.
+            out[s.name][base.stem] = _sha(_read(base))
+            continue
         if not base.is_dir():
             continue
         for path in sorted(base.rglob("*")):

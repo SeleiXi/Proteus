@@ -52,7 +52,14 @@ def file_contains(relpath: str, needle: str, name: str = ""):
     label = name or f"contains:{relpath}"
 
     def evaluate(trace: Sequence[ActionEvent], ctx: GoalContext) -> EvalResult:
-        p = Path(ctx.harness_root) / relpath
+        root = Path(ctx.harness_root).resolve()
+        p = (root / relpath).resolve()
+        # confine to the harness root: relpath is caller-supplied and, on the hosted lab,
+        # attacker-supplied — an absolute or ../ path would turn this into a file-read
+        # oracle over the host (existence + substring membership via the returned score).
+        if not (p == root or root in p.parents):
+            return EvalResult(name=label, score=0.0, passed=False,
+                              detail=f"{relpath} escapes the harness root")
         ok = p.is_file() and needle in p.read_text(encoding="utf-8", errors="replace")
         return EvalResult(name=label, score=1.0 if ok else 0.0, passed=ok,
                           detail=f"{relpath} {'contains' if ok else 'missing'} target")

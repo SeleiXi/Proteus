@@ -79,9 +79,14 @@ def between_within(streams: dict[str, list[list[str]]], level: str = "freq",
     def ratio(labs: list[str]) -> tuple[float, float, float]:
         wi = [D[i][j] for i, j in itertools.combinations(range(n), 2) if labs[i] == labs[j]]
         bw = [D[i][j] for i, j in itertools.combinations(range(n), 2) if labs[i] != labs[j]]
-        mw = sum(wi) / len(wi) if wi else 1e-9
+        mw = sum(wi) / len(wi) if wi else 0.0
         mb = sum(bw) / len(bw) if bw else 0.0
-        return (mb / mw) if mw else 0.0, mw, mb
+        # zero within-label distance is the *strongest* separation, not the absence of an
+        # effect: deterministic runs make identical within-label streams (JS = 0), and
+        # `(mb/mw) if mw else 0` reported that maximal case as R=0, inverting the signal.
+        # A tiny floor keeps the ratio large-but-finite and monotone with separation.
+        r = mb / max(mw, 1e-9)
+        return r, mw, mb
 
     if all(len(ss) < 2 for ss in streams.values()):
         raise ValueError(

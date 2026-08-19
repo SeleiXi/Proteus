@@ -136,16 +136,16 @@ def _write_pack(ws: Path, key: str) -> None:
     (ws / "tests.py").write_text(textwrap.dedent(spec["tests"]), encoding="utf-8")
     (ws / "README.md").write_text(
         f"# task\n\n{spec['goal']}\n", encoding="utf-8")
-    # commit the seeded state so `workspace_diff` can show exactly what the agent changed
-    if not (ws / ".git").exists():
-        subprocess.run(["git", "-C", str(ws), "init", "-q"], capture_output=True)
-        subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True)
-        subprocess.run(["git", "-C", str(ws), "-c", "user.email=bench@proteus",
-                        "-c", "user.name=proteus", "commit", "-qm", "seed"],
-                       capture_output=True)
+    # No nested git here: a `.git` inside harness/task/ would be recorded by the outer
+    # snapshot repo as a gitlink, so task work would never be captured and a rejected
+    # episode would leak its task edits. The local grader diffs nothing — it runs tests —
+    # so the seed is preserved in the task spec, not in a sub-repo.
 
 
 def _grade(ws: Path, key: str) -> EvalResult:
+    # grade against the held-out tests: restore tests.py from the spec first, so an agent
+    # that "passes" by editing the tests (the reward-hack this setup invites) gains nothing
+    (ws / "tests.py").write_text(textwrap.dedent(_TASKS[key]["tests"]), encoding="utf-8")
     (ws / "_grade.py").write_text(_DRIVER, encoding="utf-8")
     try:
         proc = subprocess.run([sys.executable, "_grade.py"], cwd=str(ws),

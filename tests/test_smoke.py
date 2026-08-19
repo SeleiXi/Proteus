@@ -58,3 +58,34 @@ def test_distance_path_length(tmp_path):
     # two consecutive states differ (the run added units)
     d = distance.compare(work, work, surfaces)
     assert d["notes"].distance == 0.0     # identical to itself
+
+
+def test_file_surface_is_measured(tmp_path):
+    # regression: a surface whose subdir is a single file (loop.py / AGENTS.md) must be
+    # counted, not silently skipped — it is the self-editing surface the study is about
+    from proteus.core.adapter import Surface
+    from proteus.measure import distance
+    h = tmp_path / "h"
+    (h / "mem").mkdir(parents=True)
+    (h / "loop.py").write_text("A = 1\n")
+    surfaces = [Surface("memory", "mem", unit="file"),
+                Surface("loop", "loop.py", unit="top_level_def", is_code=True)]
+    u = distance.units(h, surfaces)
+    assert u["loop"], "file-backed surface measured as empty"
+    (h / "loop.py").write_text("A = 2\n")
+    d = distance.compare(h, h, surfaces)   # identical to itself
+    assert d["loop"].distance == 0.0
+    u2 = distance.units(h, surfaces)
+    assert u2["loop"] != u                  # content change is visible
+
+
+def test_deterministic_separation_reads_high_R(tmp_path):
+    # regression: perfectly separated deterministic arms (zero within-distance) must give
+    # a LARGE R, not R=0 — the old `mb/mw if mw else 0` inverted the strongest signal
+    from proteus.measure import stream
+    A = ["read", "read", "write"]        # arm A: identical streams within
+    B = ["bash", "bash", "edit"]         # arm B: identical within, different from A
+    r = stream.between_within({"a": [A, A, A], "b": [B, B, B]},
+                              level="freq", permutations=500)
+    assert r["within"] == 0.0 and r["between"] > 0
+    assert r["R"] > 10.0                  # maximal separation, not zero

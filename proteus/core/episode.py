@@ -133,9 +133,16 @@ def run(cfg: RunConfig) -> RunResult:
             error = res.error
             break
 
-        # evaluate the episode BEFORE snapshotting, so selection can still reject it
+        # evaluate the episode BEFORE snapshotting, so selection can still reject it.
+        # an evaluator is user (or benchmark) code — a crash in it must not take the whole
+        # trajectory down; a failed evaluator records a zero and the run continues.
         trace = cfg.adapter.read_trace(cfg.root, ep)
-        results = cfg.goal.evaluate(trace, GoalContext(str(harness), ep))
+        try:
+            results = cfg.goal.evaluate(trace, GoalContext(str(harness), ep))
+        except Exception as exc:  # noqa: BLE001
+            from proteus.core.goal import EvalResult
+            results = [EvalResult(name="evaluator-error", score=0.0,
+                                  detail=f"{type(exc).__name__}: {exc}"[:200])]
         by_name = {r.name: r for r in results}
 
         # outer-loop selection on the scores (visibility-independent: an outer loop may
