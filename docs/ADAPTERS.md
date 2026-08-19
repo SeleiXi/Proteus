@@ -175,16 +175,14 @@ the loop is memory with extra steps. The arrangement that gives an external harn
 own code, without modifying the harness project, is the one Aki uses natively —
 **copy the code into the harness at seed time, boot every episode from the copy**:
 
-1. `seed()` extracts the harness's own code from the prepared image into `harness/src/`.
-   For **pi this is the real TypeScript source** (~1,100 `.ts` files, the pi-mono checkout
-   the `environments/pi-src/` image was built from); the image's entrypoint syncs the
-   agent's copy over the baked tree at boot, rebuilds with the project's own toolchain
-   when the source hash changes (outputs cached on `/state`; an untouched copy boots via
-   a pristine-hash fast path), and execs the built CLI. For **dsh it is currently the
-   published package's bundled ESM** (`lib/` + `config/`, ~216KB, readable) — the
-   from-source arrangement is the same design, pending an image built from the dsh
-   monorepo, whose pnpm + native-module build is a heavier bake. Dependencies stay in
-   the image in both cases: they are apparatus, like the interpreter.
+1. `seed()` extracts the harness's **real source** from the prepared image into
+   `harness/src/`: for pi the pi-mono checkout (~1,100 `.ts` files), for dsh the
+   deepseek-harness monorepo (~2,300 `.ts` files, via `git archive`, so the seed's src/
+   is exactly the tracked source of the build it boots). The image's entrypoint syncs
+   the agent's copy over the baked tree at boot, rebuilds with the project's own
+   toolchain when the source hash changes (outputs cached on `/state`; an untouched copy
+   boots via a pristine-hash fast path), and execs the built CLI. Dependencies stay in
+   the image: they are apparatus, like the interpreter.
 2. Every phase runs with `harness/src/<piece>` **shadow-mounted over the install path**
    (piecewise — one big mount would shadow the nested `node_modules` out of existence),
    so the stock binary boots the seed's copy. The agent edits `src/` with its ordinary
@@ -197,7 +195,10 @@ own code, without modifying the harness project, is the one Aki uses natively �
    that cannot boot never runs an episode, no API spend is burned discovering it, and
    the snapshot chain still holds every prior state.
 
-Verified live for both harnesses: editing the copy changes what boots (a marker written
-into pi's `cli.ts` appears after the automatic rebuild; a version edited into dsh's
-`package.json` appears in `--version`), and a planted error — a TS type error for pi, a
-JS syntax error for dsh — is caught by the gate and cleared by restoring the file.
+Verified live for both harnesses: a marker written into the real TypeScript entry point
+(`packages/coding-agent/src/cli.ts` for pi, `apps/cli/src/bin.ts` for dsh) appears on the
+next boot after the automatic in-container rebuild; the second boot hits the dist cache;
+and a planted TS type error is refused by the gate (exit 97 with the build log tail) and
+cleared by restoring the file. The Docker image itself is baked once per harness version
+and never rebuilt during a run — per episode, an unchanged source boots via the fast
+path, and each distinct source state pays for exactly one in-container rebuild.

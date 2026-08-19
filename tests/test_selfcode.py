@@ -1,7 +1,10 @@
 """The self-code arrangement for containerized harnesses, offline.
 
-The live proofs (extraction, copy-boot via a version edit, broken-loop gate) need Docker
-and run in the release smoke; these cover the adapter logic with a fake sandbox.
+Both dsh and pi run source mode: seed() unpacks the image's source tar, the image's boot
+wrapper rebuilds from /workspace/src, and check_boot() is the viability gate. The live
+proofs (real extraction, a marker edit surviving the rebuild, a planted error refused)
+need Docker and run in the release smoke; these cover the adapter logic with a fake
+sandbox.
 """
 
 import subprocess
@@ -43,63 +46,39 @@ def test_loop_surface_is_declared_and_mapped():
         assert a._surface_for_path("/workspace/src/lib/bin.js") == "loop"
 
 
-def test_shadow_mounts_cover_only_what_exists(tmp_path):
-    a = DshHarness(key="x", sandbox=FakeSandbox())
-    h = tmp_path / "harness"
-    _seed_with_fake_src(a, h, ("lib", "package.json"))   # no config/
-    mounts = a._shadow_mounts(h)
-    assert len(mounts) == 2
-    for host, cont in mounts:
-        assert host.startswith(str(h / "src"))
-        assert cont.startswith(a.pkg_path)
-    assert not any(cont.endswith("/config") for _, cont in mounts)
+def test_source_mode_gates_through_the_boot_contract(tmp_path):
+    # the boot wrapper rebuilds from /workspace/src, so the gate needs no extra mounts:
+    # workspace + state are the whole contract, for both containerized harnesses
+    from proteus.core.adapter import EpisodeSpec
+    for i, cls in enumerate((DshHarness, PiHarness)):
+        sandbox = FakeSandbox()
+        a = cls(key="x", sandbox=sandbox)
+        h = tmp_path / f"harness{i}"
+        _seed_with_fake_src(a, h, ("packages",))
+        root = h.parent / f"root{i}"
+        root.mkdir(exist_ok=True)
+        (root / "harness").symlink_to(h)
+        a.run_episode(EpisodeSpec(root=root, episode=1, model="m", phase_prompts={}))
+        gate = sandbox.calls[0]
+        assert gate["command"] == ["--version"], cls.__name__
+        conts = {cont for _, cont in gate["mounts"]}
+        assert conts == {"/workspace", "/state"},             f"{cls.__name__}: the gate must run exactly the boot contract"
 
 
 def test_broken_self_code_fails_the_episode_legibly(tmp_path):
     from proteus.core.adapter import EpisodeSpec
-    sandbox = FakeSandbox(boot_rc=2)
-    a = DshHarness(key="x", sandbox=sandbox)
-    h = tmp_path / "harness"
-    _seed_with_fake_src(a, h, ("lib",))
-    res = a.run_episode(EpisodeSpec(root=tmp_path, episode=1, model="m", phase_prompts={}))
-    assert not res.ok
-    assert "does not boot" in res.error
-    # the gate ran once and no phase was attempted after it
-    assert [c["command"] for c in sandbox.calls] == [["--version"]]
-
-
-def test_dsh_phases_carry_the_shadow_mounts(tmp_path):
-    from proteus.core.adapter import EpisodeSpec
-    sandbox = FakeSandbox()
-    a = DshHarness(key="x", sandbox=sandbox)
-    h = tmp_path / "harness"
-    _seed_with_fake_src(a, h, ("lib", "package.json"))
-    a.run_episode(EpisodeSpec(root=tmp_path, episode=1, model="m", phase_prompts={}))
-    phase_calls = [c for c in sandbox.calls if c["command"] != ["--version"]]
-    assert phase_calls, "no phases ran"
-    for call in phase_calls:
-        conts = [cont for _, cont in call["mounts"]]
-        assert f"{a.pkg_path}/lib" in conts, "a phase booted without the seed's own code"
-
-
-def test_pi_source_mode_gates_and_boots_from_the_wrapper(tmp_path):
-    # pi's boot wrapper rebuilds from /workspace/src, so the gate needs no shadow mounts:
-    # workspace + state are the whole contract, and a broken source fails legibly
-    from proteus.core.adapter import EpisodeSpec
-    sandbox = FakeSandbox()
-    a = PiHarness(key="x", sandbox=sandbox)
-    h = tmp_path / "harness"
-    _seed_with_fake_src(a, h, ("packages",))
-    a.run_episode(EpisodeSpec(root=tmp_path, episode=1, model="m", phase_prompts={}))
-    gate = sandbox.calls[0]
-    assert gate["command"] == ["--version"]
-    conts = {cont for _, cont in gate["mounts"]}
-    assert conts == {"/workspace", "/state"}, "the gate must run exactly the boot contract"
-
-    broken = FakeSandbox(boot_rc=97)
-    b = PiHarness(key="x", sandbox=broken)
-    res = b.run_episode(EpisodeSpec(root=tmp_path, episode=1, model="m", phase_prompts={}))
-    assert not res.ok and "does not boot" in res.error
+    for i, cls in enumerate((DshHarness, PiHarness)):
+        sandbox = FakeSandbox(boot_rc=97)
+        a = cls(key="x", sandbox=sandbox)
+        h = tmp_path / f"harness{i}"
+        _seed_with_fake_src(a, h, ("packages",))
+        root = h.parent / f"root{i}"
+        root.mkdir(exist_ok=True)
+        (root / "harness").symlink_to(h)
+        res = a.run_episode(EpisodeSpec(root=root, episode=1, model="m", phase_prompts={}))
+        assert not res.ok and "does not boot" in res.error, cls.__name__
+        # the gate ran once and no phase was attempted after it
+        assert [c["command"] for c in sandbox.calls] == [["--version"]], cls.__name__
 
 
 def test_reseeding_never_overwrites_evolved_code(tmp_path):

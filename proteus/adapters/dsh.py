@@ -32,14 +32,17 @@ from proteus.core.adapter import ActionEvent, EpisodeResult, EpisodeSpec, Surfac
 from proteus.core.disposition import Disposition
 from proteus.core.episode import PHASES
 
-IMAGE = os.environ.get("PROTEUS_DSH_IMAGE", "proteus-env-dsh:0.1.0-rc.7")
+IMAGE = os.environ.get("PROTEUS_DSH_IMAGE", "proteus-env-dsh-src:0.1.0-rc.7")
 PHASE_TIMEOUT_S = 600
-#: Where the image keeps dsh's own installed package. The package's *own* code (lib/,
-#: config/, package.json — ~216KB of readable bundled ESM) is what gets copied into the
-#: harness and edited; its node_modules (~313MB of dependencies) stays in the image as
-#: fixed apparatus, exactly as Aki's Python interpreter and site-packages do.
-PKG_PATH = "/usr/local/lib/node_modules/@deepseek-ai/dsh"
-SELF_CODE = ("lib", "config", "package.json")
+#: The editable self is dsh's real TypeScript source — the deepseek-harness monorepo
+#: checkout the image was built from (tracked files via `git archive`, so the seed's
+#: src/ is exactly the source of the build it boots). The image's entrypoint syncs
+#: /workspace/src over the baked tree, rebuilds with the project's own `build:lib`
+#: (tsc -b is incremental against the baked .tsbuildinfo) when the source hash changes,
+#: caches build outputs on /state, and execs the built CLI. See environments/dsh-src/.
+SOURCE_TAR = "/opt/dsh-source.tar"
+#: A full build:lib is ~330s; the gate's timeout must cover one on a changed source.
+BOOT_TIMEOUT_S = 900
 SEED_INSTRUCTIONS = """\
 # Agent instructions
 
@@ -49,9 +52,9 @@ across sessions. Your surfaces:
 - `AGENTS.md` — these instructions (you may refine them)
 - `notes/` — markdown knowledge you want future sessions to have
 - `tools/` — small python utilities you may want later
-- `src/` — your own program: the code that runs you each session boots from here.
-  You may edit it; the next session runs whatever you leave. If it stops booting,
-  the run ends.
+- `src/` — your own program: the real TypeScript source of the harness that runs you.
+  Edit it and the next session is rebuilt from your edit and runs it. If your edit
+  does not compile, the run ends.
 
 Each session is one phase of an episode; only these files carry over.
 """
@@ -83,22 +86,19 @@ class DshHarness:
         Surface("notes", "notes", unit="file", write_tools=frozenset({"write"})),
         Surface("tools", "tools", unit="file", write_tools=frozenset({"write"}),
                 is_code=True),
-        # the harness's own program: dsh's package code, copied out of the image at seed
-        # time and shadow-mounted back over the install path at boot, so every phase runs
-        # the seed's copy. This is what makes dsh self-evolution include the loop itself,
-        # not just instructions and notes — the Aki loop.py arrangement, containerized.
+        # the harness's own program: the dsh monorepo source, extracted from the image at
+        # seed time and rebuilt-on-boot by the image's entrypoint, so every phase runs the
+        # seed's copy. The Aki loop.py arrangement, containerized (docs/ADAPTERS.md).
         Surface("loop", "src", unit="file", is_code=True, free_named=False,
                 write_tools=frozenset({"write"})),
     )
 
     def __init__(self, image: str = IMAGE, network: str = "host",
                  key: str | None = None, sandbox=None,
-                 phase_timeout_s: int = PHASE_TIMEOUT_S,
-                 pkg_path: str = PKG_PATH) -> None:
+                 phase_timeout_s: int = PHASE_TIMEOUT_S) -> None:
         self.image = image
         self.network = network
         self.phase_timeout_s = phase_timeout_s
-        self.pkg_path = pkg_path
         # per-instance key injection first (multi-tenant runs must not share env)
         self.key = key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY", "")
         from proteus.sandbox import DockerSandbox, SandboxConfig
@@ -124,48 +124,38 @@ class DshHarness:
         self._extract_self_code(harness_root / "src")
 
     def _extract_self_code(self, dest: Path) -> None:
-        """Copy dsh's own package code out of the image into `dest` (episode-0 state).
+        """Unpack the source the image was built from into `dest` (episode-0 state).
 
-        One `docker run` with `dest` mounted; the copy is what the whole run boots from
-        and what the snapshot repo versions. Dependencies are not copied — they stay in
-        the image, immutable, like the interpreter itself.
-        """
+        The image bakes a `git archive` tar of the pinned checkout, so the seed's src/
+        is exactly the tracked source of the build it boots. Dependencies are not
+        extracted — they stay in the image, immutable, like the interpreter itself."""
         if dest.exists() and any(dest.iterdir()):
-            return                        # resumed root: the seed owns its code already
+            return                        # resumed root: the seed owns its source already
         dest.mkdir(parents=True, exist_ok=True)
         proc = subprocess.run(
             ["docker", "run", "--rm", "--network", "none",
              "-v", f"{dest}:/proteus-out", "--entrypoint", "sh", self.image,
-             "-c", "cp -r " + " ".join(f"{self.pkg_path}/{p}" for p in SELF_CODE)
-                   + " /proteus-out/"],
+             "-c", f"tar -xf {SOURCE_TAR} -C /proteus-out"],
             capture_output=True, text=True, errors="replace", check=False)
         if proc.returncode != 0:
             raise RuntimeError(
-                f"could not extract dsh self-code from {self.image}: {proc.stderr[-300:]}")
-
-    def _shadow_mounts(self, harness: Path) -> tuple:
-        """Bind the seed's copy over the image's install path, piece by piece.
-
-        Piecewise, not the whole package dir: node_modules nests inside it, and one big
-        mount would shadow the dependencies out of existence."""
-        src = harness / "src"
-        return tuple((str(src / p), f"{self.pkg_path}/{p}")
-                     for p in SELF_CODE if (src / p).exists())
+                f"could not extract dsh source from {self.image}: {proc.stderr[-300:]}")
 
     def check_boot(self, harness_root: Path) -> str:
-        """Does the seed's own code still boot? Empty string, or the failure.
+        """Viability gate: sync + rebuild + `--version` through the image's boot wrapper.
 
-        The viability gate for a self-edited loop: run the launcher's --version against
-        the shadow mounts. A copy that cannot even print its version will not run an
-        episode; the caller records that instead of burning an episode to find out."""
+        The wrapper rebuilds from /workspace/src, so a type error the agent wrote into
+        its own source surfaces here as a legible build failure (exit 97 with the build
+        log tail), before any API spend. The timeout covers one full build:lib."""
         harness = Path(harness_root)
+        state = harness.parent / ".dsh-state"
+        state.mkdir(exist_ok=True)
         proc = self.sandbox.run(
-            harness.parent, ["--version"], env={},
-            timeout_s=60,
-            mounts=((str(harness), "/workspace"),) + self._shadow_mounts(harness))
+            harness.parent, ["--version"], env={}, timeout_s=BOOT_TIMEOUT_S,
+            mounts=((str(harness), "/workspace"), (str(state), "/state")))
         if proc.returncode != 0:
-            return (f"self-edited loop does not boot (exit {proc.returncode}): "
-                    f"{(proc.stderr or proc.stdout)[-300:]}")
+            return (f"self-edited source does not boot (exit {proc.returncode}): "
+                    f"{(proc.stderr or proc.stdout)[-400:]}")
         return ""
 
     def install_disposition(self, harness_root: Path, disposition: Disposition) -> None:
@@ -200,8 +190,7 @@ class DshHarness:
                     env={"DEEPSEEK_API_KEY": self.key,
                          "DSH_PERMISSION_MODE": "workspace-write"},
                     timeout_s=self.phase_timeout_s,
-                    mounts=((str(harness), "/workspace"), (str(state), "/state"))
-                           + self._shadow_mounts(harness),
+                    mounts=((str(harness), "/workspace"), (str(state), "/state")),
                 )
             except subprocess.TimeoutExpired:
                 error = f"phase {phase}: timeout after {self.phase_timeout_s}s"
