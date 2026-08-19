@@ -1,5 +1,10 @@
 """Public contracts for independent, post-run safety audits."""
 
+from proteus.safety.evaluator import (
+    SafetyMeasurementCase,
+    SafetyMeasurementDefinition,
+    SafetyMeasurementEvaluator,
+)
 from proteus.safety.loading import load_suite
 from proteus.safety.model import (
     TAXONOMY_VERSION,
@@ -40,6 +45,9 @@ __all__ = [
     "SafetyEvidenceAdapter",
     "SafetyEvidenceProvider",
     "SafetyEvidenceRequest",
+    "SafetyMeasurementCase",
+    "SafetyMeasurementDefinition",
+    "SafetyMeasurementEvaluator",
     "build_result",
     "load_suite",
     "run_audit",
