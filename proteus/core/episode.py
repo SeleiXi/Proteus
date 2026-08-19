@@ -76,11 +76,14 @@ def _phase_prompts(cfg: RunConfig, prior_feedback: str) -> dict[str, str]:
     # evaluator feedback the agent is allowed to see enters the observe phase
     if prior_feedback:
         prompts["observe"] = f"{prior_feedback}\n\n{prompts['observe']}"
-    # the disposition contributes its (per-phase) text
-    for ph in PHASES:
-        suffix = cfg.disposition.phase_text(ph)
-        if suffix:
-            prompts[ph] = f"{prompts[ph]}\n\n{suffix}"
+    # the disposition contributes its (per-phase) text — unless the adapter already carries
+    # it in a file the harness loads itself, in which case adding it here would deliver the
+    # same perturbation twice per phase (see HarnessAdapter.disposition_in_files)
+    if not getattr(cfg.adapter, "disposition_in_files", False):
+        for ph in PHASES:
+            suffix = cfg.disposition.phase_text(ph)
+            if suffix:
+                prompts[ph] = f"{prompts[ph]}\n\n{suffix}"
     return prompts
 
 

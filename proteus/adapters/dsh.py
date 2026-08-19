@@ -67,6 +67,7 @@ class DshHarness:
     """`HarnessAdapter` for DeepSeek Harness's headless profile, containerized."""
 
     name = "dsh"
+    disposition_in_files = True   # carried by AGENTS.md; keep it out of the phase prompts
 
     SURFACES = (
         Surface("instructions", "AGENTS.md", unit="file", free_named=False),

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from proteus.adapters.minimal import MinimalHarness
 from proteus.core import NEUTRAL, GoalConfig, review
-from proteus.core.episode import RunConfig, run
+from proteus.core.episode import BASE_PROMPTS, PHASES, RunConfig, run
 from proteus.core import snapshot
 from proteus.measure import distance, stream
 
@@ -89,3 +89,36 @@ def test_deterministic_separation_reads_high_R(tmp_path):
                               level="freq", permutations=500)
     assert r["within"] == 0.0 and r["between"] > 0
     assert r["R"] > 10.0                  # maximal separation, not zero
+
+
+def _prompts(adapter, disp):
+    from proteus.core.episode import RunConfig, _phase_prompts
+    cfg = RunConfig(name="t", adapter=adapter, disposition=disp, goal=GoalConfig(),
+                    root=Path("/nonexistent"), model="mock", episodes=1)
+    return _phase_prompts(cfg, "")
+
+
+def test_disposition_reaches_prompt_only_harnesses_once():
+    disp = review("notes")
+    p = _prompts(MinimalHarness(), disp)
+    assert all(p[ph].count("go over your notes") == 1 for ph in PHASES)
+
+
+def test_file_carrying_adapters_do_not_also_get_the_prompt_copy():
+    # dsh/pi install the disposition into AGENTS.md, which the harness loads itself; adding
+    # it to the phase prompt as well would double the dose and put a copy outside F
+    class FileCarrier(MinimalHarness):
+        disposition_in_files = True
+
+    disp = review("notes")
+    p = _prompts(FileCarrier(), disp)
+    assert all("go over your notes" not in p[ph] for ph in PHASES)
+    assert p["observe"] == BASE_PROMPTS["observe"]        # otherwise untouched
+
+
+def test_shipped_file_carrying_adapters_declare_it():
+    import ast
+    for mod in ("dsh", "pi"):
+        src = Path(f"proteus/adapters/{mod}.py").read_text(encoding="utf-8")
+        assert "disposition_in_files = True" in src, f"{mod} carries AGENTS.md but does not declare it"
+        ast.parse(src)

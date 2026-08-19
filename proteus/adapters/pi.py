@@ -49,6 +49,7 @@ class PiHarness:
     """`HarnessAdapter` for pi-coding-agent's non-interactive mode, containerized."""
 
     name = "pi"
+    disposition_in_files = True   # carried by AGENTS.md; keep it out of the phase prompts
 
     SURFACES = (
         Surface("instructions", "AGENTS.md", unit="file", free_named=False),

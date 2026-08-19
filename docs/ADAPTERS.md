@@ -39,6 +39,8 @@ Node 24 for dsh, telemetry disabled, version pinned).
 ```python
 class TheirsHarness:
     name = "theirs"
+    disposition_in_files = False   # True if install_disposition writes a file the
+                                   # harness loads itself (see step 3)
 
     def surfaces(self) -> Sequence[Surface]: ...
     def required_edit_tools(self) -> frozenset[str]: ...
@@ -87,6 +89,13 @@ fingerprint). Pick the carrier that fits:
   or to an instructions file the harness reads (simplest; dsh uses a marked block);
 - **config** — substitute `disposition.config` into a config file;
 - **patch** — apply `disposition.patch` as a diff (most general; removal is a revert).
+
+By default Proteus also appends `disposition.phase_text(phase)` to every phase prompt, which
+is the whole perturbation for a harness with no instructions file. If your carrier is a file
+the harness loads on its own, set `disposition_in_files = True`: otherwise the same text
+arrives twice per phase — about double the intended dose, through two channels of different
+salience — and the prompt copy sits outside `F`, so it is neither removable nor covered by
+`disposition_fingerprint`, which is what the attribution argument rests on.
 
 ### 4. Run one episode, emit the trace
 `run_episode(spec)` executes the four phases (`spec.phase_prompts` carries goal text and

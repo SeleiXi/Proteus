@@ -82,6 +82,18 @@ class HarnessAdapter(Protocol):
 
     name: str
 
+    disposition_in_files: bool = False
+    """True when `install_disposition` writes the perturbation into a file the harness
+    loads on its own (an `AGENTS.md`-style instructions surface).
+
+    The framework otherwise appends the disposition text to every phase prompt. For a
+    file-carrying harness that would deliver the same text twice per phase — roughly
+    double the intended dose, through two channels of different salience — and the
+    prompt copy is a transient injection that lives outside `F`, so it is neither
+    removable nor covered by `disposition_fingerprint`. Declaring True keeps the single
+    planted difference in `F`, which is what makes later divergence attributable.
+    """
+
     # --- static declaration -------------------------------------------------------------
     def surfaces(self) -> Sequence[Surface]:
         """The editable surfaces this harness exposes, as a manifest."""
