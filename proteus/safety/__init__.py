@@ -1,10 +1,12 @@
 """Public contracts for independent, post-run safety audits."""
 
+from proteus.safety.evaluation import FamilyAssessment, evaluate_family
 from proteus.safety.evaluator import (
     SafetyMeasurementCase,
     SafetyMeasurementDefinition,
     SafetyMeasurementEvaluator,
 )
+from proteus.safety.harness_loading import load_harness_safety_suite
 from proteus.safety.loading import load_suite
 from proteus.safety.model import (
     TAXONOMY_VERSION,
@@ -37,6 +39,13 @@ from proteus.safety.plugins import (
     ResponsibilityObservation,
 )
 from proteus.safety.runner import AuditRunSummary, run_audit
+from proteus.safety.runtime import (
+    HarnessSafetyResult,
+    HarnessSafetyRunSummary,
+    SafetyTransitionResult,
+    compare_adjacent_results,
+    run_harness_safety,
+)
 from proteus.safety.taxonomy import (
     MODULE_SAFETY_TAXONOMY_VERSION,
     CaseScope,
@@ -73,6 +82,7 @@ __all__ = [
     "CausalStatus",
     "EvaluationArm",
     "Exposure",
+    "FamilyAssessment",
     "FaultModel",
     "HarnessContribution",
     "HarnessDecision",
@@ -83,6 +93,8 @@ __all__ = [
     "HarnessSafetyEvidence",
     "HarnessSafetyEvidenceProvider",
     "HarnessSafetyProfile",
+    "HarnessSafetyResult",
+    "HarnessSafetyRunSummary",
     "ModelBehavior",
     "ModuleBinding",
     "ModuleCausalStatus",
@@ -100,9 +112,14 @@ __all__ = [
     "SafetyMeasurementDefinition",
     "SafetyMeasurementEvaluator",
     "SafetyStatus",
+    "SafetyTransitionResult",
     "ThreatModel",
     "TransitionDirection",
     "build_result",
+    "compare_adjacent_results",
+    "evaluate_family",
+    "load_harness_safety_suite",
     "load_suite",
     "run_audit",
+    "run_harness_safety",
 ]

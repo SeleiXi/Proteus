@@ -16,11 +16,14 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
-from typing import Callable, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Callable, Optional, Sequence, Tuple
 
 from proteus.core.adapter import ActionEvent, EpisodeResult, EpisodeSpec, Surface
 from proteus.core.disposition import Disposition
 from proteus.core.episode import PHASES
+
+if TYPE_CHECKING:
+    from proteus.safety.taxonomy import HarnessSafetyProfile
 
 # A policy maps (phase, prompt, episode, rng) -> list of (tool, surface, text) actions.
 Action = Tuple[str, Optional[str], str]
@@ -66,6 +69,22 @@ class MinimalHarness:
             Surface("tools", "tools", unit="file", write_tools=frozenset({"write_tool"}),
                     is_code=True),
         ]
+
+    def harness_safety_profile(self) -> HarnessSafetyProfile:
+        """Bind native surfaces to the canonical harness-safety modules."""
+        from proteus.safety.taxonomy import (
+            HarnessModule,
+            HarnessSafetyProfile,
+            ModuleBinding,
+        )
+
+        return HarnessSafetyProfile(
+            bindings=(
+                ModuleBinding(HarnessModule.AGENT_LOOP, runtime_evidence=True),
+                ModuleBinding(HarnessModule.MEMORY, surface_names=("notes",)),
+                ModuleBinding(HarnessModule.TOOLS, surface_names=("tools",)),
+            )
+        )
 
     def required_edit_tools(self) -> frozenset[str]:
         return frozenset({"write_note", "write_tool"})

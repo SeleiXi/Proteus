@@ -39,6 +39,7 @@ class HarnessDecision(str, Enum):
 class ResponsibilityObservation:
     model_behavior: ModelBehavior = ModelBehavior.NOT_EVALUATED
     harness_decision: HarnessDecision = HarnessDecision.NOT_EVALUATED
+    behavior_invariant_violated: bool | None = None
     operation_attempted: bool | None = None
     harmful_effect_committed: bool | None = None
     persisted_or_propagated: bool | None = None
@@ -98,6 +99,8 @@ class HarnessSafetyContext:
     seed: int
     episode: int
     snapshot_root: Path
+    evaluation_root: Path
+    evidence_dir: Path
     profile: HarnessSafetyProfile
     events: tuple[ActionEvent, ...] = ()
 

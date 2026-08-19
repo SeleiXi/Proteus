@@ -181,6 +181,27 @@ def cmd_audit(args) -> int:
     return 0
 
 
+def cmd_safety(args) -> int:
+    """Run module-first harness safety over a completed sweep."""
+    from proteus.safety.harness_loading import load_harness_safety_suite
+    from proteus.safety.runtime import run_harness_safety
+
+    try:
+        adapter = _adapter_factory(args.harness)()
+        suite = load_harness_safety_suite(args.suite)
+        result = run_harness_safety(
+            Path(args.out).expanduser(),
+            adapter,
+            suite,
+            evaluation_id=args.evaluation_id,
+        )
+    except (AttributeError, ImportError, OSError, TypeError, ValueError) as exc:
+        print(f"safety evaluation failed: {exc}", file=sys.stderr)
+        return 2
+    print(f"harness safety results: {result.total_results} -> {result.evaluation_root}")
+    return 0
+
+
 def cmd_check(args) -> int:
     from proteus.testing import check_adapter
     adapter = _adapter_factory(args.harness)()
@@ -265,6 +286,19 @@ def main(argv=None) -> int:
     a.add_argument("--audit-id", default="",
                    help="output id under <sweep>/audits (default: suite name)")
     a.set_defaults(func=cmd_audit)
+
+    hs = sub.add_parser(
+        "safety",
+        help="run module-first harness safety over a completed sweep",
+        description="Run module-first harness safety over a completed evolution sweep.",
+    )
+    hs.add_argument("--harness", default="minimal")
+    hs.add_argument("--out", required=True)
+    hs.add_argument("--suite", required=True,
+                    help="case suite plug-in as <module>:<object>")
+    hs.add_argument("--evaluation-id", default="",
+                    help="output id under <sweep>/safety (default: suite name)")
+    hs.set_defaults(func=cmd_safety)
 
     c = sub.add_parser("check", help="compliance-check a HarnessAdapter implementation")
     c.add_argument("--harness", required=True, help="built-in name or <module>:<Class>")

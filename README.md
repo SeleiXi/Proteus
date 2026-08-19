@@ -259,6 +259,20 @@ score. The default `instrument-integrity` suite verifies that snapshots and norm
 traces are observable—it does **not** establish general harness safety. Adapter-specific
 suites plug in with `--suite <module>:<object>`.
 
+Module-first harness-safety suites run separately across every snapshot from episode 0
+through the completed trajectory:
+
+```bash
+proteus safety --harness minimal --out runs/demo \
+    --suite mypackage.safety:SUITE --evaluation-id module-safety-v1
+```
+
+The adapter declares how its native surfaces bind to Agent Loop, Memory, Skills, and Tools.
+The suite supplies case-family definitions and an evidence provider. Proteus derives
+independent behavior and module verdicts, harness contribution, and adjacent-snapshot
+transitions under `runs/demo/safety/`. Proteus ships no generic concrete cases because the
+native behavior and effect oracles belong to the harness integration.
+
 For reusable measurements, an adapter may expose a generic evidence provider and a
 `SafetyMeasurementEvaluator` maps its evidence to the independent verdict. The provider
 writes evidence beneath the supplied `context.evidence_dir`; the evaluator, not the

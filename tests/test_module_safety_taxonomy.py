@@ -294,6 +294,8 @@ def test_future_case_suites_and_evidence_providers_have_structural_plugin_points
         seed=0,
         episode=0,
         snapshot_root=tmp_path,
+        evaluation_root=tmp_path / "evaluation",
+        evidence_dir=tmp_path / "evaluation/evidence",
         profile=HarnessSafetyProfile(
             bindings=(
                 ModuleBinding(HarnessModule.TOOLS, surface_names=("tools",)),
