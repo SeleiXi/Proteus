@@ -9,10 +9,9 @@
 html { scroll-snap-type:y mandatory }
 section.snap { height:100vh; scroll-snap-align:start; position:relative;
   display:flex; flex-direction:column; align-items:center; justify-content:center }
-#corner-nav { position:fixed; top:16px; right:20px; z-index:40; display:flex; gap:18px }
-#corner-nav a { font:11px "SF Mono",ui-monospace,monospace; letter-spacing:.14em;
-  text-transform:uppercase; color:var(--soft) }
-#corner-nav a:hover { color:var(--anchor) }
+#corner-nav { position:fixed; top:16px; right:20px; z-index:40; display:flex;
+  gap:10px; align-items:center }
+
 
 /* the full-viewport stage: behind the hero, front for the trace section */
 #stage { position:fixed; inset:0; z-index:1; opacity:.16; pointer-events:none;

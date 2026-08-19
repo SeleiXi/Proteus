@@ -36,9 +36,8 @@ header.site img { height:30px; background:#fff; padding:2px;
 header.site .name { font-weight:400; letter-spacing:.22em; font-size:13px;
   font-family:"SF Mono",ui-monospace,monospace }
 header.site nav { margin-left:auto; display:flex; gap:20px }
-header.site nav a { font-size:12px; letter-spacing:.12em; text-transform:uppercase;
-  font-family:"SF Mono",ui-monospace,monospace; color:var(--soft) }
-header.site nav a:hover { color:var(--anchor) }
+header.site nav { gap:10px; align-items:center }
+header.site nav a { color:var(--soft) }
 
 .hero { text-align:center; padding:11vh 22px 8vh }
 .hero .kicker { margin-bottom:26px }
@@ -144,7 +143,11 @@ header.site .mark { height: 26px; width: auto }
 .hero-sec .mark.lockup, .hero .mark.lockup { height: 150px }
 
 /* theme toggle */
-#theme-btn { background: none; border: 1px solid var(--rule); color: var(--soft);
+/* every nav control — links and the theme switch — wears the same pill */
+#theme-btn, header.site nav a, #corner-nav a {
+  background: none; border: 1px solid var(--rule); color: var(--soft);
   font: 11px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .12em;
-  text-transform: uppercase; padding: 6px 10px; cursor: pointer }
-#theme-btn:hover { color: var(--anchor); border-color: var(--anchor) }
+  text-transform: uppercase; padding: 6px 10px; cursor: pointer;
+  text-decoration: none; display: inline-block }
+#theme-btn:hover, header.site nav a:hover, #corner-nav a:hover {
+  color: var(--anchor); border-color: var(--anchor); text-decoration: none }
