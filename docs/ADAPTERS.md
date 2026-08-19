@@ -167,3 +167,29 @@ whole sweep: finished seeds are skipped, partial ones pick up at the episode aft
 last snapshot. `completed_episodes()` counts contiguous snapshot commits, not trace files —
 a provider outage writes a trace per failed attempt, and counting those reports a seed that
 finished nothing as complete.
+
+## Letting the harness edit its own code
+
+Instructions and notes are not the interesting ceiling: self-evolution that cannot touch
+the loop is memory with extra steps. The arrangement that gives an external harness its
+own code, without modifying the harness project, is the one Aki uses natively —
+**copy the code into the harness at seed time, boot every episode from the copy**:
+
+1. `seed()` extracts the harness's *own package code* from the prepared image into
+   `harness/src/` (dsh: `lib/` + `config/` + `package.json`, ~216KB; pi: `dist/` +
+   `package.json`, ~9MB — both readable JS). Dependencies stay in the image: they are
+   apparatus, like the interpreter.
+2. Every phase runs with `harness/src/<piece>` **shadow-mounted over the install path**
+   (piecewise — one big mount would shadow the nested `node_modules` out of existence),
+   so the stock binary boots the seed's copy. The agent edits `src/` with its ordinary
+   workspace tools; the next session runs whatever it left.
+3. `src/` is a declared surface (`loop`, `is_code=True`), inside the snapshot repo — code
+   edits are versioned per episode and measured with the same ruler as notes and tools.
+4. Before each episode, `check_boot()` runs the launcher's `--version` against the
+   shadow mounts — the **viability gate**. A copy that cannot print its version will not
+   run an episode; the episode records a legible failure instead of burning API spend to
+   discover it, and the snapshot chain still holds every prior state.
+
+Verified live for both dsh and pi: editing the copy's `package.json` version changes what
+`--version` prints (the boot really is the copy), and a syntax error planted in the entry
+point is caught by the gate and cleared by restoring the file.

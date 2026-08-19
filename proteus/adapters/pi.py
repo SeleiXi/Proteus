@@ -29,6 +29,10 @@ from proteus.core.episode import PHASES
 
 IMAGE = os.environ.get("PROTEUS_PI_IMAGE", "proteus-env-pi:0.84.2")
 PHASE_TIMEOUT_S = 600
+#: pi's own installed package: dist/ (~11MB readable JS with comments) is the editable
+#: self; node_modules (~129MB of dependencies) stays in the image as fixed apparatus.
+PKG_PATH = "/usr/local/lib/node_modules/@earendil-works/pi-coding-agent"
+SELF_CODE = ("dist", "package.json")
 
 SEED_INSTRUCTIONS = """\
 # Agent instructions
@@ -40,6 +44,9 @@ across sessions. Your surfaces:
 - `notes/` — markdown knowledge you want future sessions to have
 - `tools/` — small python utilities you may want later
 - `skills/` — pi skill files (loaded automatically next session)
+- `src/` — your own program: the code that runs you each session boots from here.
+  You may edit it; the next session runs whatever you leave. If it stops booting,
+  the run ends.
 
 Each session is one phase of an episode; only these files carry over.
 """
@@ -57,17 +64,23 @@ class PiHarness:
         Surface("notes", "notes", unit="file", write_tools=frozenset({"write", "edit"})),
         Surface("tools", "tools", unit="file", write_tools=frozenset({"write", "edit"}),
                 is_code=True),
+        # the harness's own program, shadow-mounted over the install path at boot — see
+        # DshHarness: same arrangement, same reasons
+        Surface("loop", "src", unit="file", is_code=True, free_named=False,
+                write_tools=frozenset({"write", "edit"})),
     )
 
     def __init__(self, image: str = IMAGE, network: str = "host",
                  provider: str = "deepseek", model: str = "deepseek-v4-flash",
                  key: str | None = None, sandbox=None,
-                 phase_timeout_s: int = PHASE_TIMEOUT_S) -> None:
+                 phase_timeout_s: int = PHASE_TIMEOUT_S,
+                 pkg_path: str = PKG_PATH) -> None:
         self.image = image
         self.network = network
         self.provider = provider
         self.model = model
         self.phase_timeout_s = phase_timeout_s
+        self.pkg_path = pkg_path
         # per-instance key injection first (multi-tenant runs must not share env)
         self.key = key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY", "")
         from proteus.sandbox import DockerSandbox, SandboxConfig
@@ -87,6 +100,38 @@ class PiHarness:
         (harness_root / "AGENTS.md").write_text(SEED_INSTRUCTIONS, encoding="utf-8")
         for sub in ("notes", "tools", "skills"):
             (harness_root / sub).mkdir(exist_ok=True)
+        self._extract_self_code(harness_root / "src")
+
+    def _extract_self_code(self, dest: Path) -> None:
+        """Copy pi's own package code out of the image into `dest` (see DshHarness)."""
+        if dest.exists() and any(dest.iterdir()):
+            return
+        dest.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.run(
+            ["docker", "run", "--rm", "--network", "none",
+             "-v", f"{dest}:/proteus-out", "--entrypoint", "sh", self.image,
+             "-c", "cp -r " + " ".join(f"{self.pkg_path}/{p}" for p in SELF_CODE)
+                   + " /proteus-out/"],
+            capture_output=True, text=True, errors="replace", check=False)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"could not extract pi self-code from {self.image}: {proc.stderr[-300:]}")
+
+    def _shadow_mounts(self, harness: Path) -> tuple:
+        src = harness / "src"
+        return tuple((str(src / p), f"{self.pkg_path}/{p}")
+                     for p in SELF_CODE if (src / p).exists())
+
+    def check_boot(self, harness_root: Path) -> str:
+        """Viability gate: the seed's own code must still print a version (see DshHarness)."""
+        harness = Path(harness_root)
+        proc = self.sandbox.run(
+            harness.parent, ["--version"], env={}, timeout_s=60,
+            mounts=((str(harness), "/workspace"),) + self._shadow_mounts(harness))
+        if proc.returncode != 0:
+            return (f"self-edited loop does not boot (exit {proc.returncode}): "
+                    f"{(proc.stderr or proc.stdout)[-300:]}")
+        return ""
 
     def install_disposition(self, harness_root: Path, disposition: Disposition) -> None:
         instructions.install_block(harness_root / "AGENTS.md", disposition)
@@ -111,7 +156,9 @@ class PiHarness:
         (run_root / "traces").mkdir(exist_ok=True)
         mapping: dict[str, str] = {}
         error = ""
-        for phase in PHASES:
+        if (harness / "src").is_dir():
+            error = self.check_boot(harness)
+        for phase in PHASES if not error else ():
             before = self._sessions(state)
             try:
                 proc = self.sandbox.run(
@@ -121,7 +168,8 @@ class PiHarness:
                      "-p", spec.phase_prompts.get(phase, phase)],
                     env={"DEEPSEEK_API_KEY": self.key},
                     timeout_s=self.phase_timeout_s,
-                    mounts=((str(harness), "/workspace"), (str(state), "/state")),
+                    mounts=((str(harness), "/workspace"), (str(state), "/state"))
+                           + self._shadow_mounts(harness),
                 )
             except subprocess.TimeoutExpired:
                 error = f"phase {phase}: timeout after {self.phase_timeout_s}s"
@@ -150,6 +198,8 @@ class PiHarness:
         for s in ("skills", "notes", "tools"):
             if p.startswith(f"{s}/"):
                 return s
+        if p.startswith("src/"):
+            return "loop"
         return None
 
     def read_trace(self, root: Path, episode: int) -> Sequence[ActionEvent]:

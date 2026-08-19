@@ -11,10 +11,11 @@ def main() -> int:
     import tests.test_goals as G
     import tests.test_instrument as I
     import tests.test_polyglot as P
+    import tests.test_selfcode as C
     import tests.test_smoke as S
     tmp = pathlib.Path(tempfile.mkdtemp())
     passed = failed = 0
-    for mod in (G, S, A, B, I, P):
+    for mod in (G, S, A, B, I, P, C):
         for name in [n for n in dir(mod) if n.startswith("test_")]:
             fn = getattr(mod, name)
             d = tmp / mod.__name__ / name
