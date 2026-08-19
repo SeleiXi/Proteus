@@ -1,8 +1,8 @@
 # Proteus web
 
-- `static/` — the site (landing, playground, live run view). Deployed to GitHub Pages by
+- `static/` — the site (landing, lab, live run view). Deployed to GitHub Pages by
   `.github/workflows/pages.yml`; also served by the backend itself.
-- `server.py` — the hosted playground backend: static + API, FIFO queue, bounded
+- `server.py` — the hosted lab backend: static + API, FIFO queue, bounded
   concurrency, BYO-key (memory only), hard caps, artifact TTL.
 
 ## Run the backend

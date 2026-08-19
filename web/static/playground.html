@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Proteus Playground</title>
+<title>Proteus Lab</title>
 <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
@@ -50,7 +50,7 @@
 </header>
 
 <div class="wrap">
-  <h2>Playground · configure a run</h2>
+  <h2>The lab · configure a run</h2>
   <div id="backend-banner" class="banner">checking backend…</div>
 
   <div class="formcard">
@@ -252,9 +252,9 @@ function cli(s) {
       : `--arm ${a.kind}:${a.surface}`);
   if (s.goal.mode !== "none")
     parts.push(`--goal "task:${(s.goal.goals[0].text || "").replace(/"/g, "'")}"`);
-  parts.push(`--seeds ${s.seeds} --episodes ${s.episodes} --out runs/playground`);
+  parts.push(`--seeds ${s.seeds} --episodes ${s.episodes} --out runs/lab`);
   return parts.join(" \\\n    ") +
-    `\nproteus watch --out runs/playground   # live page` +
+    `\nproteus watch --out runs/lab   # live page` +
     (s.harness === "minimal" ? "" :
      `\n# export ${s.harness === "llm" ? "DEEPSEEK_API_KEY" : "DEEPSEEK_API_KEY"}=<your key> first`);
 }
