@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/yichen14/Proteus/actions/workflows/ci.yml"><img src="https://github.com/yichen14/Proteus/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/proteus-evolve/Proteus/actions/workflows/ci.yml"><img src="https://github.com/proteus-evolve/Proteus/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/version-0.1.0-informational.svg" alt="v0.1.0">

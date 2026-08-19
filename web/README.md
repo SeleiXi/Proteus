@@ -1,9 +1,10 @@
 # The Proteus site
 
 Four static pages plus a small Python backend. No build step, no framework, no
-dependencies: open `web/static/index.html` in a browser and it works. Deployed to
-<https://yichen14.github.io/Proteus/> by `.github/workflows/pages.yml`, which publishes
-`web/static/` verbatim on every push to `main`.
+dependencies: open `web/static/index.html` in a browser and it works. The canonical site is
+<https://proteus-evolve.github.io/>. Its deployment repository is
+[`proteus-evolve/proteus-evolve.github.io`](https://github.com/proteus-evolve/proteus-evolve.github.io),
+whose root mirrors `web/static/`.
 
 ## Files
 
