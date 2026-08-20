@@ -67,24 +67,29 @@ def _zstd_partial(data: bytes) -> bytes:
     partial frame; everything before it decodes cleanly. This is what makes a live turn
     count possible while a phase is still running. Returns what could be decoded; any
     failure (including no zstd support on this interpreter) returns what it has."""
-    out = b""
-    rest = data
+    out = bytearray()
     try:
         try:
             from compression import zstd as _z  # Python 3.14+
-            mk = _z.ZstdDecompressor
+            rest = data
+            while rest:
+                d = _z.ZstdDecompressor()
+                out += d.decompress(rest)
+                rest = d.unused_data
         except ImportError:
-            import zstandard as _z
-            mk = lambda: _z.ZstdDecompressor().decompressobj()  # noqa: E731
-        while rest:
-            d = mk()
-            out += d.decompress(rest)
-            rest = getattr(d, "unused_data", b"")
-            if not rest:
-                break
+            import io
+
+            import zstandard
+            reader = zstandard.ZstdDecompressor().stream_reader(
+                io.BytesIO(data), read_across_frames=True)
+            while True:
+                chunk = reader.read(65536)
+                if not chunk:
+                    break
+                out += chunk
     except Exception:  # noqa: BLE001 - a partial tail frame is expected, not an error
         pass
-    return out
+    return bytes(out)
 
 
 def _zstd_decompress(data: bytes) -> bytes:
@@ -99,7 +104,18 @@ def _zstd_decompress(data: bytes) -> bytes:
                 "reading dsh session logs needs Python 3.14+ (compression.zstd) or "
                 "`pip install zstandard`"
             ) from exc
-        return zstandard.ZstdDecompressor().decompress(data)
+        # dsh streams its log one frame per event with no content size in the frame
+        # header; the zstandard package's one-shot decompress() refuses exactly that.
+        # A cross-frame stream reader handles it on every interpreter.
+        import io
+        reader = zstandard.ZstdDecompressor().stream_reader(
+            io.BytesIO(data), read_across_frames=True)
+        out = bytearray()
+        while True:
+            chunk = reader.read(65536)
+            if not chunk:
+                return bytes(out)
+            out += chunk
 
 
 class DshHarness:
