@@ -2,7 +2,8 @@
 
 An `Evaluator` is any callable `(trace, ctx) -> EvalResult`; these cover the common cases
 so tests, examples, and quick experiments need no custom code. Benchmark verifiers and LLM
-judges plug in the same way — write a callable, put it on a `Goal`.
+judges plug in the same way — write a callable and wrap it in an `EvaluatorSpec` (or use
+the compatibility `Goal` API).
 """
 
 from __future__ import annotations

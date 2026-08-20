@@ -11,22 +11,22 @@ tracked source of the build it boots.
 Rebuild:
 
 ```bash
-git clone --depth 1 https://github.com/deepseek-ai/deepseek-harness /tmp/dsh-src
-git -C /tmp/dsh-src fetch --depth 1 origin tag dsh-v0.1.0-rc.7
-git -C /tmp/dsh-src checkout dsh-v0.1.0-rc.7
-cp environments/dsh-src/boot.sh /tmp/dsh-src/.proteus-boot.sh
+DSH_BUILD_ROOT="$(mktemp -d)"
+DSH_CONTEXT="$DSH_BUILD_ROOT/deepseek-harness"
+git clone --depth 1 https://github.com/deepseek-ai/deepseek-harness "$DSH_CONTEXT"
+git -C "$DSH_CONTEXT" fetch --depth 1 origin tag dsh-v0.1.0-rc.7
+git -C "$DSH_CONTEXT" checkout dsh-v0.1.0-rc.7
+cp environments/dsh-src/boot.sh "$DSH_CONTEXT/.proteus-boot.sh"
 # --network host: the default bridge goes through vpnkit NAT on macOS, whose connections
 # exhaust under pnpm's parallel registry fetches and kill the install
 docker build --network host -f environments/dsh-src/Dockerfile \
-    -t proteus-env-dsh-src:0.1.0-rc.7 /tmp/dsh-src
+    -t proteus-env-dsh-src:0.1.0-rc.7 "$DSH_CONTEXT"
 ```
 
-Measured on this machine (macOS, arm64): bake ~12 min; pristine boot ~45s per phase
-(64MB source copied + hashed across the bind mount); a changed source pays one in-container
-`build:lib` (~100s incremental against the baked `.tsbuildinfo`); cache hits boot in ~45s.
-The copy-and-hash overhead on unchanged boots is the known optimization target — skipping
-the copy on the pristine path is safe (byte-identical by definition) but requires care on
-the cache-hit path, where runtime-read files (`config/`) must still be synced.
+An untouched source takes the pristine fast path without copying or rebuilding. A changed
+source is exact-synced and pays one in-container `build:lib` per distinct source hash;
+subsequent boots of that source state reuse `/state` while still syncing runtime-read files
+such as `config/`.
 
 Attribution: deepseek-harness (github.com/deepseek-ai/deepseek-harness), MIT.
 

@@ -17,11 +17,34 @@ Everything else — seeding into the harness, per-evaluator visibility, selectio
 records, the tracking page — is the framework's job and works the same for every
 benchmark. Wire it into a run with:
 
+```bash
+# Built-in local task; benchmark evaluators seed <run>/task/ automatically.
+proteus run --harness pi \
+    --goal "Fix the interval merge implementation." \
+    --evaluator local:interval-merge@observe \
+    --arm neutral --seeds 2 --episodes 10 --out runs/intervals
+
+# External Polyglot exercise; the dataset is shallow-cloned and cached on first use.
+proteus run --harness pi \
+    --goal "Implement the Bowling exercise and pass its tests." \
+    --evaluator polyglot:bowling@observe \
+    --arm neutral --seeds 2 --episodes 10 --out runs/bowling
+```
+
+The CLI accepts at most one benchmark evaluator per run because a run has one task
+workspace. Measurement and custom evaluators remain repeatable alongside it. The equivalent
+Python API is:
+
 ```python
 from proteus.bench import as_goal
 task = ...
 cfg = RunConfig(..., goal=as_goal(task, visibility=Visibility.OBSERVE), task=task)
 ```
+
+The framework seeds `<run>/task/`, but the adapter owns agent I/O: an adapter that supports
+benchmarks must expose that sibling workspace without moving it into `harness/`. The built-in
+DSH and Pi adapters bind it at `/workspace/task`, and benchmark goal text directs the agent
+to that `task/` directory.
 
 ## The three tiers
 
@@ -49,9 +72,10 @@ Each of these exists because an agent found the exploit or a run hit the failure
 3. **Grading is cwd-independent.** Resolve every path beside the driver file, never
    against the working directory: the same grader must work on the host (cwd = workspace)
    and inside a container (cwd = whatever the image says, usually `/`).
-4. **No nested git in the workspace.** A `.git` inside `harness/task/` becomes a gitlink
-   in the run's snapshot repo: task work stops being captured, and a rejected episode
-   leaks its task edits into the next one.
+4. **Keep the task outside the measured snapshot.** `task_root(harness_root)` resolves to
+   `<run>/task/`, a sibling of `<run>/harness/`. Containerized adapters mount it at
+   `/workspace/task`. This lets SWE-bench keep its own `.git` repository without turning it
+   into a gitlink in the harness snapshot; selection rolls back the harness, never the task.
 5. **Grading runs agent-authored code — treat it that way.** The grader executes whatever
    the agent left in the workspace. Run it under the same isolation as the episode, or
    only against harnesses you trust.

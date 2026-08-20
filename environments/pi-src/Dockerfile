@@ -1,6 +1,6 @@
 # pi, built from its own source, bootable from an agent-edited copy of that source.
 # Build context = a pi-mono checkout at the pinned tag; this file and boot.sh are copied
-# into the context by `proteus env build` (or by hand, see environments/pi-src/README.md).
+# into the context by the pinned build recipe in environments/pi-src/README.md.
 FROM node:24-slim
 COPY . /opt/src
 WORKDIR /opt/src

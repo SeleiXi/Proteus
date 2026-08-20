@@ -18,7 +18,8 @@ This note records what we adopted, what we deliberately do differently, and why.
    declare `network` per environment; `none` is the default in `SandboxConfig`.
 3. **Date/version-tagged prebuilt images, never `latest`.** Harbor ships every
    Terminal-Bench task as a Docker Hub image tagged by build date. We tag
-   `proteus-env-<name>:<harness-version>` (e.g. `proteus-env-dsh:0.1.0-rc.7`).
+   `proteus-env-<name>:<harness-version>` (e.g.
+   `proteus-env-dsh-src:0.1.0-rc.7`).
 4. **Prefixed image naming for safe cleanup.** Harbor prefixes locally built images
    (`hb__*`) so `cache clean` can match them. Our `proteus-env-` prefix serves the same
    purpose.
@@ -53,14 +54,16 @@ This note records what we adopted, what we deliberately do differently, and why.
   image rebuilds, snapshots of the mounts instead of artifact collection, and no
   benchmark registry — the `environments/` directory in-repo is the registry.
 - Harbor's agent abstraction installs the agent *into* the task container at trial time.
-  Proteus bakes the harness into the environment image at build time (pinned), because
-  the harness is the constant apparatus and the workspace is the variable.
+  Proteus source-mode images bake a pinned pristine harness, its dependencies, and its
+  build toolchain once. At seed time the adapter extracts the real source into the mounted
+  workspace; later boots rebuild from that evolvable copy without rebuilding the image.
+  Dependencies and toolchain are the constant apparatus; the run-local source is part of
+  the measured subject.
 
 ## Bringing your own environment
 
-Nothing about the container is fixed. Point `--env` at an image reference, or at a
-directory / `environment.toml` describing one, and the containerised harnesses evolve
-inside it:
+Point `--env` at a compatible image reference, or at a directory / `environment.toml`
+describing one, to override a containerized adapter's default environment:
 
 ```bash
 proteus run --harness dsh --env ghcr.io/you/your-env:1.4 --network host \
@@ -104,21 +107,29 @@ env = SandboxConfig.from_spec("./my-env", network="host")
 harness = DshHarness(sandbox=DockerSandbox(env), phase_timeout_s=1200)
 ```
 
-Two requirements the image must meet: the harness binary is on the `PATH` (the adapter
-appends its own arguments to whatever the image's entrypoint is), and the mount points the
-adapter uses exist — `/workspace` for the evolving harness and `/state` for the harness's
-own session storage, for both `dsh` and `pi`. Everything else is yours.
+The image contract belongs to the adapter. For `dsh` and `pi`, a replacement must provide
+the same source-mode contract as their bundled images: the expected source tar
+(`/opt/dsh-source.tar` or `/opt/pi-source.tar`), an entrypoint that exact-syncs
+`/workspace/src` onto the pinned tree, rebuilds on source-hash changes, and then accepts the
+adapter's CLI arguments. The adapters mount `/workspace`, `/state`, and, for benchmark runs,
+`/workspace/task`. Their defaults also run containers as the host uid/gid so bind-mounted
+files remain editable and snapshot-cleanable on Linux. A custom adapter may define a
+different image contract.
 
 ## Bounding an episode
 
-Two independent limits, both per episode and both yours to set:
+The episode budget and wall-clock backstop are independent:
 
 - `--max-turns` is the iteration budget: the number of steps an episode may take before it
-  stops, enforced by the adapter rather than suggested to the model. The `minimal` and
-  `llm` harnesses stop mid-phase when they reach it and record `turn_capped`.
+  stops, enforced by the adapter rather than merely suggested to the model. `minimal` and
+  `llm` enforce it directly. `dsh` and `pi` enforce it exactly between phases and
+  approximately within a phase by polling their native session logs and stopping the
+  container at the budget line. `--min-turns-per-phase` reserves budget for later phases;
+  `--announce-budget` additionally tells the agent the limit, an off-by-default
+  experimental condition. Budget stops record `turn_capped` and snapshot normally.
 - `--phase-timeout` is wall-clock seconds per phase for containerised harnesses, where the
-  external CLI owns its own loop and a turn count is not ours to enforce. Reaching it ends
-  the episode with a timeout error rather than hanging the sweep. Default 600.
+  external CLI owns its own loop. Reaching it ends the episode with a timeout error rather
+  than hanging the sweep. Default 600.
 
 Episode cost grows with episode index — later episodes wake up to a larger harness and read
 more of it — so a cap that is comfortable at episode 1 is the one that matters at episode 30.

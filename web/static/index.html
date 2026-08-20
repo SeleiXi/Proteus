@@ -208,8 +208,8 @@ l-65 0 0 105 0 105 75 0 c46 0 87 -6 104 -14z"/>
     <div class="card">
       <h3>Any harness</h3>
       Plug in DeepSeek Harness, Pi, our reference harnesses, or your own — one small
-      adapter, no harness code modified. The framework, sandbox, and measurement work
-      unchanged.
+      adapter, upstream untouched. Each run can evolve its own harness source while the
+      framework, sandbox, and measurement work unchanged.
     </div>
     <div class="card">
       <h3>Goal or no goal</h3>
@@ -402,13 +402,20 @@ if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
 
 <section class="page"><div class="wrap">
   <h2>60-second demo · no key · no docker</h2>
-  <pre class="cmd">pip install proteus-evolve   # or: git clone github.com/proteus-evolve/Proteus && pip install -e .
+  <pre class="cmd">git clone https://github.com/proteus-evolve/Proteus.git && cd Proteus
+python3 -m pip install -e .
 proteus run --harness minimal --arm neutral --arm review:notes --arm review:tools \
     --seeds 4 --episodes 8 --out runs/demo
 proteus measure --harness minimal --out runs/demo</pre>
 
   <footer class="site">Proteus · plug in / evolve / measure ·
-<a href="https://github.com/proteus-evolve/Proteus">github.com/proteus-evolve/Proteus</a></footer>
+    <a href="https://github.com/proteus-evolve/Proteus">github.com/proteus-evolve/Proteus</a>
+    <a class="site-counter" href="https://hits.sh/proteus-evolve.github.io/"
+      aria-label="View public site visit statistics">
+      <img src="https://hits.sh/proteus-evolve.github.io.svg?view=total&amp;style=flat-square&amp;label=site%20visits&amp;color=2E5D43&amp;labelColor=7A7263"
+        alt="Proteus site visit count" height="20" decoding="async">
+    </a>
+  </footer>
 </div></section>
 
 

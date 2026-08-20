@@ -5,8 +5,10 @@
     proteus measure --out runs/demo          # structural + behavioural distance, per arm
 
 `--arm` is `neutral`, or `review:<surface>` / `record:<surface>` (repeatable). `--goal` is
-`none` (no-goal) or `task:<text>` (a stated objective). The default harness is `minimal`,
-which runs offline; `aki` plugs in the reference research harness.
+freeform objective text (`none` for no-goal); repeatable `--evaluator` flags independently
+choose what is measured and whether the agent sees it. The default harness is `minimal`,
+which runs offline; `dsh` and `pi` are the source-evolving container adapters, and `aki`
+plugs in the reference research harness.
 """
 
 from __future__ import annotations
@@ -385,8 +387,9 @@ def main(argv=None) -> int:
                         "evaluator and set it @observe, or the agent cannot pursue it.")
     r.add_argument("--evaluator", action="append", metavar="SPEC",
                    help="attach an evaluator, repeatable: units:<surface> | tool-calls | "
-                        "step | contains:<relpath>:<needle>, each with optional "
-                        "@hidden (default) or @observe")
+                        "step | local:<task> | polyglot:<exercise> | "
+                        "contains:<relpath>:<needle>, each with optional @hidden "
+                        "(default) or @observe; at most one benchmark task per run")
     r.add_argument("--seeds", type=int, default=4)
     r.add_argument("--episodes", type=int, default=10)
     r.add_argument("--max-turns", type=int, default=100)

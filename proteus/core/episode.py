@@ -50,9 +50,10 @@ class RunConfig:
     least `len(PHASES) * min_turns_per_phase`."""
     seed: int = 0
     task: object | None = None
-    """A `proteus.bench.BenchTask` to seed into the harness before episode 1, for
-    goal-conditioned runs. The task workspace lives inside the harness workspace so no
-    adapter needs to know about it."""
+    """A `proteus.bench.BenchTask` to seed before episode 1. Its workspace is
+    `<run>/task/`, beside the measured `<run>/harness/` and outside the snapshot. An
+    adapter that supports benchmark work must expose that sibling to its agent; dsh/pi
+    mount it at `/workspace/task`."""
     announce_budget: bool = False
     """Tell the agent its per-episode budget (`max_turns`) in every phase prompt, so it
     can plan within it. Off by default: announcing the budget changes behaviour — that is

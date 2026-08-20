@@ -136,10 +136,9 @@ def _write_pack(ws: Path, key: str) -> None:
     (ws / "tests.py").write_text(textwrap.dedent(spec["tests"]), encoding="utf-8")
     (ws / "README.md").write_text(
         f"# task\n\n{spec['goal']}\n", encoding="utf-8")
-    # No nested git here: a `.git` inside harness/task/ would be recorded by the outer
-    # snapshot repo as a gitlink, so task work would never be captured and a rejected
-    # episode would leak its task edits. The local grader diffs nothing — it runs tests —
-    # so the seed is preserved in the task spec, not in a sub-repo.
+    # The local grader diffs nothing — it runs tests — so it needs no task-local git
+    # repository. `<run>/task/` is deliberately outside the harness snapshot; benchmark
+    # work moves forward while accept/reject selection applies only to the harness.
 
 
 def _grade(ws: Path, key: str) -> EvalResult:

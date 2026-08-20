@@ -19,7 +19,7 @@ goal-conditioned pi run readable with the same ruler.
 |---|---|---|
 | 1. `adapter.seed(harness_root, rng_seed)` | adapter | lay down the episode-0 state: surface directories, initial instructions; dsh/pi also extract their own code from the image into `harness/src/` |
 | 2. `adapter.install_disposition(...)` | adapter | install the action-preference perturbation — must be removable; the carrier is the adapter's choice (§ contract) |
-| 3. task seeding (goal-conditioned runs only) | framework | `seed_task` writes the benchmark task into `harness/task/` |
+| 3. task seeding (benchmark runs only) | framework | `seed_task` writes the benchmark task into `<run>/task/`, beside the harness and outside its snapshot; dsh/pi mount it at `/workspace/task` |
 | 4. `snapshot.init(harness)` | framework | bare git repo; **every ignore rule disabled** (the harness is the measured object — nothing in it may be invisible to the instrument); commit `episode 0` |
 
 Resume (`run(cfg, start=N)`) skips all four and continues on the evolved harness on
@@ -65,9 +65,11 @@ adapter's:
   JSONL trace line per step; `max_turns` is a **hard cap** — stop cleanly, finish the
   episode;
 - **dsh / pi** (external CLI): each phase boots a **fresh container** and hands the
-  stock CLI that phase's prompt as its task; the workspace mounts at `/workspace`, the
-  harness's own state at `/state`; self-edited code takes effect via the rebuild-on-boot
-  wrapper. `max_turns` is enforced in two layers, both harness-agnostic: **exactly
+  CLI built from the run's current source that phase's prompt as its task; the workspace
+  mounts at `/workspace`, the
+  harness's own state at `/state`, and an optional benchmark workspace at
+  `/workspace/task`; self-edited code takes effect via the rebuild-on-boot wrapper.
+  `max_turns` is enforced in two layers, both harness-agnostic: **exactly
   between phases** (no new phase once the budget is spent) and **approximately
   mid-phase** (the session log is polled live — pi's is plain JSONL, dsh's flushes one
   zstd frame per event — and the container is stopped when the count crosses the
@@ -123,6 +125,10 @@ the agent itself never sees.
      the next one;
   4. commit `episode N [rejected]`, keeping the mapping gapless.
 
+Only `harness/` participates in selection. A benchmark task is the exercise rather than
+the measured subject, so `<run>/task/` moves forward and is not restored when a harness
+candidate is rejected.
+
 ### 8. Records and feedback — framework
 
 - `eval_history` appends every result plus the accept/reject flag;
@@ -158,6 +164,7 @@ working tree the snapshot describes.
 
 | contract item | decides | examples of divergence |
 |---|---|---|
+| `name` | stable adapter identity used in records and diagnostics | minimal / dsh / pi / aki |
 | `surfaces()` | the measurable surface manifest (data, not a constant) | minimal: notes+tools; dsh: +instructions+loop; pi: +skills |
 | `seed()` | the episode-0 state | dsh/pi extract their own code into `src/` |
 | `install_disposition()` | the perturbation's carrier | minimal: a JSON file; dsh/pi: a marked `AGENTS.md` block |

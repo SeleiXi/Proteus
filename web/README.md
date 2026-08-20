@@ -1,16 +1,19 @@
 # The Proteus site
 
-Four static pages plus a small Python backend. No build step, no framework, no
-dependencies: open `web/static/index.html` in a browser and it works. The canonical site is
-<https://proteus-evolve.github.io/>. Its deployment repository is
+Four static pages plus a small Python backend. There is no build step or frontend framework:
+open `web/static/index.html` in a browser and the site works (the visit badge is simply
+unavailable when offline). The canonical site is <https://proteus-evolve.github.io/>. Its
+deployment repository is
 [`proteus-evolve/proteus-evolve.github.io`](https://github.com/proteus-evolve/proteus-evolve.github.io),
-whose root mirrors `web/static/`.
+whose published page files mirror `web/static/`; repository-only metadata such as
+`.nojekyll` and its README live only in the deployment repository. Treat `web/static/` as
+the source of truth.
 
 ## Files
 
 | Path | What it is |
 |---|---|
-| [`web/static/index.html`](static/index.html) | The landing page. ~500 lines of CSS and ~500 of JS inline, both in `<style>`/`<script>` blocks. Everything below under "The landing page" lives here. |
+| [`web/static/index.html`](static/index.html) | The landing page. Page-specific CSS and JavaScript remain inline in `<style>`/`<script>` blocks; shared tokens and components come from `site.css`. Everything below under "The landing page" lives here. |
 | [`web/static/playground.html`](static/playground.html) | The public Evolving Lab: three curated episode-by-episode replays with an expandable action stream, measurements, setup, and source note for every episode. Hosted run creation is intentionally unavailable; the plus card points people to the repository. |
 | [`web/static/run.html`](static/run.html) | Live tracker for one submitted run: polls the backend, draws the identity fabric (one cell per episode, coloured by the surface that grew most). |
 | [`web/static/demo.html`](static/demo.html) | Specimen viewer for a single recorded trajectory. |
@@ -23,9 +26,12 @@ whose root mirrors `web/static/`.
 | [`web/static/assets/proteus-logo.svg`](static/assets/proteus-logo.svg) | Graph mark + traced PROTEUS wordmark, both centred on a shared axis in a 621x734 box. |
 | [`web/server.py`](server.py) | Reserved local/future Lab backend: a FIFO queue with a concurrency cap, a harness allowlist, per-run episode caps, and run/status JSON endpoints. The public Evolving Lab does not call it. Localhost / trusted network only — see its module docstring. |
 
-The two `.png` files in `assets/` are the original raster logo and an architecture
-diagram. The vector `.svg` files replaced the logo PNG on every page; the PNG is kept
-only as the source of record.
+The two `.png` files in `assets/` are the original raster logo and a legacy architecture
+diagram. The vector `.svg` files replaced the logo PNG on every page; the PNG is kept only
+as the source of record. The legacy architecture PNG is not embedded—the current,
+code-aligned architecture diagram is Mermaid in the root README. The landing-page footer
+loads its public visit count from `hits.sh`; that counter is the site's one intentional
+runtime network dependency.
 
 ## Conventions
 
@@ -102,7 +108,5 @@ page-level horizontal scroll is the failure mode this layout is most prone to.
 - `run.html` inserts arm labels with `innerHTML`, and `server.py` accepts HTML in
   review/record surface names: stored XSS if the backend is ever exposed. Escape at both
   ends before hosting this anywhere but localhost.
-- The 60-second demo block on the landing page says `pip install proteus-evolve`; that
-  project is not on PyPI yet. Either publish it or change the line to the `git clone`
-  form beside it.
-- No CI covers the web directory — Pages deploys whatever is on `main`.
+- Pages deploys `web/static/`, but no automated browser or visual regression test covers
+  the web directory.

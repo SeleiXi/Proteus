@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/proteus-evolve/Proteus/actions/workflows/ci.yml"><img src="https://github.com/proteus-evolve/Proteus/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/proteus-evolve/Proteus/actions/workflows/release-smoke.yml"><img src="https://github.com/proteus-evolve/Proteus/actions/workflows/release-smoke.yml/badge.svg" alt="release smoke"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/version-0.1.0-informational.svg" alt="v0.1.0">
@@ -47,9 +48,9 @@ self-evolving harness actually *do*, and does an initial condition leave a perma
 Three things set it apart from every existing harness-evolution system:
 
 1. **Harness-agnostic.** Others evolve harnesses built from their *own* primitives. Proteus
-   evolves *yours*: implement one small `HarnessAdapter` and your agent — Aki (default),
-   DeepSeek Harness, a bare ReAct loop, or your own — plugs into the same framework,
-   sandbox, and measurement.
+   evolves *yours*: implement one small `HarnessAdapter` and your agent — the bundled
+   offline `minimal` harness (the CLI default), DeepSeek Harness, Pi, Aki, or your own —
+   plugs into the same framework, sandbox, and measurement.
 2. **Goal *and* no-goal, with visible or hidden evaluators.** Others hard-code a single
    regime: one benchmark verifier, agent blind to the score, goal mandatory. Proteus spans
    the space — `no-goal | one goal | many goals`, and evaluators the agent either **sees**
@@ -100,16 +101,26 @@ An installed action preference measurably shifts what the harness grows — and 
 | `aki` | the Aki research harness (the paper's apparatus) | the research checkout |
 | yours | `--harness <module>:<Class>` — no registration | your adapter |
 
-`dsh` is the template for third-party integrations: no harness code modified — the adapter
-seeds a workspace, launches the prepared container per phase, and reads the session logs
-back. Its disposition installs as a removable block in `AGENTS.md`, which dsh reads
-natively.
+`dsh` and `pi` are the source-evolving third-party integrations. At seed time each adapter
+extracts the pinned harness's real TypeScript source into `harness/src/`; every later phase
+boots that copy, rebuilding it when its content changes. The source is therefore a measured,
+snapshotted `loop` surface alongside instructions, notes, tools, and skills. The adapters
+still leave the upstream repositories untouched: they arrange the run copy, launch one
+prepared container per phase, and parse the harness's own session logs.
 
 ## 🏗️ How it works
 
-<p align="center">
-  <img src="docs/assets/proteus-architecture.png" alt="The Proteus evolve loop" width="900">
-</p>
+```mermaid
+flowchart LR
+    U["Run config<br/>harness × model<br/>goal + evaluators<br/>arms + seeds"] --> F["Proteus framework<br/>assemble phase prompts"]
+    F --> A["HarnessAdapter<br/>run one episode"]
+    A --> H["harness/<br/>evolving, snapshotted subject"]
+    A --> T["task/<br/>optional benchmark workspace<br/>outside the snapshot"]
+    A --> L["native harness logs"]
+    L --> E["evaluators<br/>hidden or observe-visible"]
+    E --> S["selection + snapshot<br/>accept or preserve-and-restore"]
+    S --> F
+```
 
 Every seed runs `N` context-fresh **episodes**; only files cross the episode boundary. One
 episode is four phases:
@@ -153,13 +164,19 @@ NEUTRAL              # the control, F0 — no perturbation
 ### Goals and evaluators
 
 ```python
-from proteus.core import GoalConfig, Goal, Visibility
+from proteus.core import EvaluatorSpec, GoalConfig, Visibility
 
 GoalConfig.no_goal()                                    # unpressured evolution
-GoalConfig.single(Goal("solve", text=..., evaluator=my_eval,
-                       visibility=Visibility.OBSERVE))  # agent sees its score
-GoalConfig.multi([...])                                 # several objectives at once
-GoalConfig.single(goal, selection="accept_reject")      # outer loop rejects regressions
+GoalConfig.of(text="Become more reliable.")             # stated goal, no evaluator
+GoalConfig.of(
+    text="Become more reliable.",
+    evaluators=(EvaluatorSpec("reliability", my_eval,
+                              visibility=Visibility.OBSERVE),),
+)                                                       # agent sees the score next episode
+GoalConfig.of(text="Pursue A and B together.",
+              evaluators=(EvaluatorSpec("a", eval_a),
+                          EvaluatorSpec("b", eval_b)),
+              selection="accept_reject")               # outer loop rejects regressions
 ```
 
 An evaluator is any callable `(trace, ctx) -> EvalResult`; bring a benchmark verifier, an
@@ -196,11 +213,13 @@ round-trip, snapshot-ability, trace shape). The full guide: [docs/ADAPTERS.md](d
 
 ## 📦 Prepared environments
 
-`environments/` ships one pinned Docker environment per supported harness — a `Dockerfile`
-plus an `environment.toml` manifest (`SandboxConfig.from_manifest` loads it). The evolving
-workspace is always a mount, never baked into the image, so one image serves every
-condition and seed. Conventions: [environments/README.md](environments/README.md); design
-survey behind them (what we borrowed from Harbor): [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md).
+`environments/` contains two environment shapes. Manifest-backed environments pair a
+`Dockerfile` or prebuilt image with `environment.toml`; the built-in `dsh-src/` and
+`pi-src/` images are instead built from pinned upstream source checkouts, because the image
+must contain the exact source and toolchain that the adapter later extracts and rebuilds.
+In both shapes evolving state lives in mounts, never in a per-run image. Conventions:
+[environments/README.md](environments/README.md); design notes:
+[docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md).
 
 ## 📏 Measurement
 
@@ -237,15 +256,18 @@ roots, so the evolving agent can never read its own condition.
 
 ## 📊 Status
 
-`v0.1` (research preview). Working today: the offline `minimal` harness with the full
-measurement suite; the `llm` harness live against DeepSeek; the `dsh` adapter running
-DeepSeek Harness headless episodes in its prepared container; the `aki` adapter — measure
-path reads existing research runs with no checkout, run path drives the containerized
-research runner; repo-first environment builds; the adapter compliance checker; CI on
-Python 3.10–3.14. As a cross-implementation check, Proteus's behavioural ruler applied to
-the research runs independently reproduces their headline dynamics: arms separate at
-episode 1 (R = 1.63) and converge by episode 30 (R = 0.93). Proteus is the open framework
-behind our paper on action preference as an initial condition for self-improving agents.
+`v0.1` (research preview). Working today: the offline `minimal` harness; the live `llm`
+harness; pinned, source-evolving DeepSeek Harness and Pi adapters with exact-tree boot,
+rebuild caching, viability gates, turn budgets, and task mounts; the Aki research adapter;
+local, Polyglot, and SWE-bench task integrations; resume-safe sweeps; the full measurement,
+audit, reliability, report, and repository-export paths; and adapter/environment tooling.
+CI covers Python 3.10–3.14. The separate release-smoke workflow runs two episodes across
+the public release set (`minimal`, `llm`, `dsh`, `pi`), exercises the benchmark path, and
+requires both container harnesses to edit their own source and boot the edit; releases use
+pinned upstream versions, while the weekly upstream canary is advisory. As a
+cross-implementation check, Proteus's
+behavioural ruler applied to the research runs independently reproduces their headline
+dynamics: arms separate at episode 1 (R = 1.63) and converge by episode 30 (R = 0.93).
 
 ## 📖 Citation
 

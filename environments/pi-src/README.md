@@ -11,13 +11,18 @@ with the build log tail — that is the adapter's viability gate.
 Rebuild (pin the tag you mean to study):
 
 ```bash
-git clone --depth 1 --branch v0.84.2 https://github.com/badlogic/pi-mono /tmp/pi-src
+PI_BUILD_ROOT="$(mktemp -d)"
+PI_CONTEXT="$PI_BUILD_ROOT/pi-mono"
+git clone --depth 1 --branch v0.84.2 \
+    https://github.com/badlogic/pi-mono "$PI_CONTEXT"
 # hydrate the model catalogs in the context — the one network fetch, pinned at bake time
-docker run --rm -v /tmp/pi-src:/opt/src -w /opt/src --network host node:24-slim \
+docker run --rm -v "$PI_CONTEXT:/opt/src" -w /opt/src --network host node:24-slim \
     sh -c 'npm ci --no-audit --no-fund && npm run hydrate:model-data'
-rm -rf /tmp/pi-src/node_modules /tmp/pi-src/packages/*/dist /tmp/pi-src/packages/*/*/dist
-cp environments/pi-src/boot.sh /tmp/pi-src/.proteus-boot.sh
-docker build -f environments/pi-src/Dockerfile -t proteus-env-pi-src:0.84.2 /tmp/pi-src
+docker run --rm -v "$PI_CONTEXT:/opt/src" --entrypoint sh node:24-slim \
+    -c 'rm -rf /opt/src/node_modules /opt/src/packages/*/dist /opt/src/packages/*/*/dist'
+cp environments/pi-src/boot.sh "$PI_CONTEXT/.proteus-boot.sh"
+docker build -f environments/pi-src/Dockerfile \
+    -t proteus-env-pi-src:0.84.2 "$PI_CONTEXT"
 ```
 
 Attribution: pi-mono (github.com/badlogic/pi-mono), MIT.

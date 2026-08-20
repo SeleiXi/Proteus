@@ -2,20 +2,21 @@
 
 `dsh` is DeepSeek's open-source agent harness (github.com/deepseek-ai/deepseek-harness,
 MIT, Node >= 24). This adapter runs its **headless profile** — one fresh persisted session
-per phase — inside the prepared image `environments/deepseek-harness/`, so the host needs
-Docker and nothing else. It is the template for integrating a harness Proteus does not
-control: no dsh code is modified; the adapter only arranges files, launches containers,
-and reads session logs back.
+per phase — inside the source-mode image from `environments/dsh-src/`. The pinned upstream
+checkout stays untouched, while each run receives its own evolvable copy of the real
+TypeScript source. The adapter exact-syncs and rebuilds that copy on boot, launches the
+container, and reads dsh's native session logs back.
 
 Layout under the run root:
     harness/            the workspace dsh mounts at /workspace (the evolving state)
       AGENTS.md         instructions surface — dsh reads it natively; the disposition
                         is installed here as a removable marked block
       notes/  tools/    persistent surfaces the seed instructions establish
+      src/              real dsh monorepo source; rebuilt and booted after edits
     .dsh-state/         DSH_HOME (sessions land here; not part of the harness)
     traces/epNNN.json   episode -> {phase: session dir} mapping
 
-Requirements: the image (build once from environments/deepseek-harness/), a DeepSeek key
+Requirements: the image (build once from environments/dsh-src/), a DeepSeek key
 in DEEPSEEK_API_KEY (or DEEPSEEK_KEY), and Python 3.14+ or the `zstandard` package to read
 dsh's zstd-compressed session JSONL.
 """

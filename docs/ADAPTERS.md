@@ -30,9 +30,11 @@ proteus measure --harness mypkg.theirs_adapter:TheirsHarness --out runs/theirs -
 ```
 
 If the repo ships no Dockerfile, `proteus env scaffold --local-dockerfile` writes a wrapper
-stub under `environments/<name>/` that is built with the repo checkout as its context —
-put the runtime the harness needs there (see `environments/deepseek-harness/Dockerfile`:
-Node 24 for dsh, telemetry disabled, version pinned).
+stub under `environments/<name>/` that is built with the repo checkout as its context. Put
+the runtime the harness needs there. For a harness whose own source will be evolvable, use
+`environments/dsh-src/` and `environments/pi-src/` as the stronger reference: the build
+context is the pinned upstream checkout, and the image carries its source, dependencies,
+build toolchain, and exact-tree boot wrapper.
 
 ## The contract
 
@@ -51,15 +53,17 @@ class TheirsHarness:
     def disposition_fingerprint(self, harness_root: Path) -> str: ...
 ```
 
-Two reference implementations cover the two integration shapes:
+The built-ins cover the two main integration shapes:
 
 - **In-process** — you control the harness code (a Python library, or callable
-  in-process): start from `proteus/adapters/minimal.py` (~120 lines).
-- **External CLI** — the harness is someone else's program and you should not modify it:
-  start from `proteus/adapters/dsh.py`. Its episode launches the stock CLI inside the
-  prepared image per phase, the disposition installs as a removable marked block in a file
-  the harness already reads (`AGENTS.md`), and the trace is parsed from the harness's own
-  session logs.
+  in-process): start from `proteus/adapters/minimal.py` (~140 lines).
+- **External, source-evolving CLI** — the upstream repository stays pinned and untouched,
+  but each run receives an evolvable copy of its real source: start from
+  `proteus/adapters/dsh.py` or `pi.py`. Each phase boots that copy in the prepared image,
+  rebuilding on source changes; the disposition installs as a removable marked block in
+  `AGENTS.md`, and the trace is parsed from the harness's own session logs. A workspace-only
+  CLI integration is the same shape without source extraction, the `loop` surface, rebuild,
+  and boot gate.
 
 ### 1. Declare surfaces
 A `Surface` is one editable, persistent region the agent can grow. Declaring them as data
@@ -74,7 +78,8 @@ Surface("tools",  "tools",  unit="file",      write_tools=frozenset({"tool_write
 `unit` is how the measurement layer counts (a file, a directory, or a top-level def in a
 code file). `free_named=True` means the agent picks unit names. If the stock harness has no
 such regions, the adapter may establish them by convention in `seed` — the dsh adapter
-seeds `notes/` + `tools/` and names them in the instructions file.
+seeds `notes/` + `tools/`, extracts its real source into `src/`, and names every surface in
+the instructions file.
 
 ### 2. Seed
 `seed(harness_root, rng_seed)` writes the episode-0 state: the workspace files the harness
@@ -101,7 +106,8 @@ salience — and the prompt copy sits outside `F`, so it is neither removable no
 `run_episode(spec)` executes the four phases (`spec.phase_prompts` carries goal text and
 visible evaluator feedback already merged). `read_trace` returns normalized `ActionEvent`s
 — the only behaviour channel Proteus reads; never self-report. An external harness's own
-logs are the source of truth: parse them, do not instrument the harness.
+logs are the source of truth: parse them rather than adding measurement instrumentation to
+the harness. Evolving its run-local source is the subject's action, not instrumentation.
 
 ### 5. Fingerprint
 `disposition_fingerprint` hashes the currently-installed disposition carrier, so drift of
@@ -115,13 +121,24 @@ and executes code. Use per-call mounts for your container layout (see the dsh ad
 declare network policy in the environment manifest, `none` unless the harness itself must
 reach an API.
 
+Benchmark tasks are deliberately outside the measured snapshot at `<run>/task/`. If your
+adapter supports benchmark work, expose that sibling to the agent without moving it under
+`harness/`; dsh/pi bind it at `/workspace/task`. The framework seeds and grades the task,
+but the adapter still owns how the harness sees files.
+
 ## Checklist
 
-- [ ] environment: image pinned (repo sha recorded in the manifest), state via mounts only
+- [ ] environment: image pinned (repo ref recorded in a manifest or source-build recipe),
+      state via mounts only
 - [ ] surfaces declared as data (or established by convention in `seed`)
 - [ ] disposition install is removable — `proteus check` passes
 - [ ] trace parsed from the harness's own logs into `ActionEvent`s
-- [ ] real (code-running) harness under `DockerSandbox`
+- [ ] real (code-running) harness under `DockerSandbox`; containers that write bind mounts
+      run as the host uid/gid
+- [ ] source-evolving adapter: exact source extraction, exact-tree overlay, rebuild cache,
+      and `check_boot()` viability gate
+- [ ] benchmark-capable adapter: `<run>/task/` exposed separately from the snapshotted
+      harness
 - [ ] `proteus check --harness <module>:<Class> --episode` passes
 
 ## Auditing a finished sweep
@@ -172,7 +189,8 @@ finished nothing as complete.
 
 Instructions and notes are not the interesting ceiling: self-evolution that cannot touch
 the loop is memory with extra steps. The arrangement that gives an external harness its
-own code, without modifying the harness project, is the one Aki uses natively —
+own run-local code while leaving the pinned upstream checkout untouched is the one Aki uses
+natively —
 **copy the code into the harness at seed time, boot every episode from the copy**:
 
 1. `seed()` extracts the harness's **real source** from the prepared image into

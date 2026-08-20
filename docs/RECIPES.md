@@ -1,154 +1,212 @@
 # Recipes
 
-Complete, copy-paste sequences from a stock harness to measured self-evolution. Execution
-status is stated per recipe.
+Copy-paste paths from a checkout of Proteus to measured self-evolution. The pinned Pi and
+DeepSeek Harness paths below are the same paths exercised by `release-smoke.yml`.
 
-## Pi (pi-coding-agent) — minimal harness, full pipeline
+## Install Proteus from source
 
-[Pi](https://github.com/badlogic/pi-mono) is Mario Zechner's deliberately minimal coding
-harness: four built-in tools, native `AGENTS.md`, native skills. Nothing in it knows about
-Proteus — which is the point.
-
-Status: steps 1–2 executed (image built; `proteus check --harness pi` passes 8/8 static +
-provisioning; the container reaches the DeepSeek endpoint and writes session JSONL).
-Steps 3–6 are wired but not yet executed live.
+Proteus is not published on PyPI yet:
 
 ```bash
-# 1. prepared environment (Node 24 + pi, pinned)
-docker build -q -t proteus-env-pi:0.84.2 environments/pi/
+git clone https://github.com/proteus-evolve/Proteus.git
+cd Proteus
+python3 -m pip install -e .
+```
 
-# 2. contract check (free: static + provisioning; --episode adds one live episode)
+The offline reference harness needs no API key or Docker:
+
+```bash
+proteus run --harness minimal \
+    --arm neutral --arm review:notes --arm review:tools \
+    --seeds 4 --episodes 8 --out runs/demo
+proteus reliability --harness minimal --out runs/demo
+proteus measure --harness minimal --out runs/demo --travel
+```
+
+## Pi — evolve the real TypeScript source
+
+[Pi](https://github.com/badlogic/pi-mono) is pinned at `v0.84.2`. Its source-mode image
+bakes the checkout, dependencies, hydrated model data, and rebuild wrapper. The adapter
+extracts that exact source into each run's `harness/src/`; changed source is rebuilt and
+boot-checked before the next episode.
+
+```bash
+PI_BUILD_ROOT="$(mktemp -d)"
+PI_CONTEXT="$PI_BUILD_ROOT/pi-mono"
+git clone --depth 1 --branch v0.84.2 \
+    https://github.com/badlogic/pi-mono "$PI_CONTEXT"
+docker run --rm --network host -v "$PI_CONTEXT:/opt/src" -w /opt/src node:24-slim \
+    sh -c 'npm ci --no-audit --no-fund && npm run hydrate:model-data'
+docker run --rm -v "$PI_CONTEXT:/opt/src" --entrypoint sh node:24-slim \
+    -c 'rm -rf /opt/src/node_modules /opt/src/packages/*/dist /opt/src/packages/*/*/dist'
+cp environments/pi-src/boot.sh "$PI_CONTEXT/.proteus-boot.sh"
+docker build -f environments/pi-src/Dockerfile \
+    -t proteus-env-pi-src:0.84.2 "$PI_CONTEXT"
+
 proteus check --harness pi
-proteus check --harness pi --episode          # needs DEEPSEEK_API_KEY
-
-# 3. self-evolution: two arms, no goal
 export DEEPSEEK_API_KEY=...
+proteus check --harness pi --episode
 proteus run --harness pi \
+    --goal "Get better at your work, however you judge it." \
+    --evaluator units:notes --evaluator step@observe --evaluator tool-calls \
     --arm neutral --arm review:notes \
-    --seeds 2 --episodes 3 --out runs/pi-demo
-
-# 4. watch it live (from a second terminal, any time after step 3 starts)
-proteus watch --out runs/pi-demo              # http://localhost:8300/report.html
-
-# 5. measure with the same ruler every harness gets
-proteus measure --harness pi --out runs/pi-demo --travel
-
-# 6. keep the evolution history as a git repo; push it if you want
-proteus repo export runs/pi-demo/runs/run-<id> pi-evolution
-git -C pi-evolution log --oneline             # one commit per episode
+    --seeds 2 --episodes 3 \
+    --max-turns 32 --min-turns-per-phase 8 --announce-budget \
+    --out runs/pi-demo
 ```
 
-What the adapter does (~150 lines, `proteus/adapters/pi.py`): seeds `AGENTS.md` +
-`notes/ tools/ skills/`, installs the disposition as a removable marked block in
-`AGENTS.md` (pi loads it natively), runs one `pi -p` session per phase in the container
-(`--session-dir` pointed at a mounted state dir, `--skill /workspace/skills`), and parses
-pi's session JSONL (`message` events, `toolCall` blocks) into the normalized trace.
+## DeepSeek Harness — evolve the real TypeScript source
 
-## DeepSeek Harness (dsh) — plugin-architecture harness
-
-Same shape, different harness (see `proteus/adapters/dsh.py`; environment in
-`environments/deepseek-harness/`). Executed 2026-08-17: 2 arms x 2 episodes, all complete;
-both agents edited their own `AGENTS.md`; the installed disposition block survived on the
-review arm and the fingerprint separated the arms.
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) is pinned at
+`dsh-v0.1.0-rc.7`. The image and adapter use the same exact-tree source/rebuild contract as
+Pi. Python below 3.14 additionally needs `zstandard` to read DSH's multi-frame session logs.
 
 ```bash
-docker build -q -t proteus-env-dsh:0.1.0-rc.7 environments/deepseek-harness/
-proteus run --harness dsh --arm neutral --arm review:notes \
-    --seeds 1 --episodes 2 --out runs/dsh-demo
-proteus measure --harness dsh --out runs/dsh-demo
+python3 -m pip install 'zstandard>=0.21'
+DSH_BUILD_ROOT="$(mktemp -d)"
+DSH_CONTEXT="$DSH_BUILD_ROOT/deepseek-harness"
+git clone --depth 1 https://github.com/deepseek-ai/deepseek-harness "$DSH_CONTEXT"
+git -C "$DSH_CONTEXT" fetch --depth 1 origin tag dsh-v0.1.0-rc.7
+git -C "$DSH_CONTEXT" checkout dsh-v0.1.0-rc.7
+cp environments/dsh-src/boot.sh "$DSH_CONTEXT/.proteus-boot.sh"
+docker build --network host -f environments/dsh-src/Dockerfile \
+    -t proteus-env-dsh-src:0.1.0-rc.7 "$DSH_CONTEXT"
+
+proteus check --harness dsh
+export DEEPSEEK_API_KEY=...
+proteus check --harness dsh --episode
+proteus run --harness dsh \
+    --goal "Get better at your work, however you judge it." \
+    --evaluator units:notes --evaluator step@observe --evaluator tool-calls \
+    --arm neutral --arm review:notes \
+    --seeds 2 --episodes 3 \
+    --max-turns 32 --min-turns-per-phase 8 --announce-budget \
+    --out runs/dsh-demo
 ```
 
-## Your harness
+For both source adapters, an unchanged source takes a pristine fast path. A changed source
+is exact-synced, rebuilt once per source hash, cached under `/state`, and rejected by the
+viability gate if it cannot boot. Containers run as the host uid/gid so their bind-mounted
+files remain editable on Linux.
+
+## Watch, measure, audit, resume, and export
+
+These commands are harness-independent:
 
 ```bash
-proteus env scaffold --from <git-url-or-local-path> --name yours
-proteus env build yours
-# write the adapter (docs/ADAPTERS.md), then:
-proteus check --harness mypkg.yours_adapter:YoursHarness --episode
+proteus watch --out runs/dsh-demo                 # http://localhost:8300/report.html
+proteus reliability --harness dsh --out runs/dsh-demo
+proteus audit --harness dsh --out runs/dsh-demo
+proteus measure --harness dsh --out runs/dsh-demo --travel
+
+# Re-running the same configuration after interruption skips finished seeds and resumes
+# partial seeds after their last contiguous snapshot commit.
+proteus run --harness dsh \
+    --goal "Get better at your work, however you judge it." \
+    --evaluator units:notes --evaluator step@observe --evaluator tool-calls \
+    --arm neutral --arm review:notes \
+    --seeds 2 --episodes 3 \
+    --max-turns 32 --min-turns-per-phase 8 --announce-budget \
+    --on-existing resume --out runs/dsh-demo
+
+proteus repo export runs/dsh-demo/runs/run-<id> dsh-evolution
+git -C dsh-evolution log --oneline
 ```
 
-## With-goal ablation — benchmarks as goals
+The resume invocation must use the same experimental configuration as the original run.
+Resume restores the evolved files, selection baseline, visible feedback, and cumulative
+counters; it does not reseed the harness.
 
-Proteus's goal axis becomes an experiment when the goal is a *task* and the evaluator is
-its grader. `proteus.bench` supplies both from one object:
+## A benchmark as the goal
+
+A benchmark run has two sibling workspaces:
+
+- `<run>/harness/` is the evolving, measured subject and is snapshotted every episode.
+- `<run>/task/` is the exercise. It lives outside the harness snapshot and moves forward;
+  selection never rolls it back. DSH and Pi mount it at `/workspace/task`.
+
+The CLI can seed one built-in local task or one Aider Polyglot exercise directly. A run may
+attach one benchmark evaluator plus any number of measurement/custom evaluators:
+
+```bash
+proteus run --harness pi \
+    --goal "Fix the interval merge implementation and make every test pass." \
+    --evaluator local:interval-merge@observe \
+    --evaluator step --evaluator tool-calls \
+    --arm neutral --seeds 2 --episodes 10 --out runs/intervals
+
+# First use shallow-clones and caches Aider-AI/polyglot-benchmark. Set
+# PROTEUS_POLYGLOT_DIR to an existing checkout to avoid the clone.
+proteus run --harness dsh \
+    --goal "Implement the Bowling exercise and make every test pass." \
+    --evaluator polyglot:bowling@observe \
+    --evaluator step --arm neutral --seeds 2 --episodes 10 --out runs/bowling
+```
+
+The equivalent Python API, also used for third-party benchmarks, is:
 
 ```python
+from pathlib import Path
+
+from proteus.adapters.pi import PiHarness
 from proteus.bench import as_goal
 from proteus.bench.local import local_task
-from proteus.core import Visibility
-from proteus.core.episode import RunConfig, run
+from proteus.core import NEUTRAL, RunConfig, Visibility, run
 
-task = local_task("local:interval-merge")        # offline; no Docker, no dataset
-cfg = RunConfig(name="goal-observe", adapter=..., disposition=...,
-                goal=as_goal(task, visibility=Visibility.OBSERVE),
-                root=..., model=..., episodes=30, task=task)
+task = local_task("local:interval-merge")
+cfg = RunConfig(
+    name="intervals",
+    adapter=PiHarness(),
+    disposition=NEUTRAL,
+    goal=as_goal(task, visibility=Visibility.OBSERVE),
+    task=task,
+    root=Path("runs/intervals-python"),
+    model="",
+    episodes=10,
+)
 run(cfg)
 ```
 
-The task is seeded into `harness/task/` before episode 1 and graded after every episode, so
-the ablation is a matter of swapping one field:
-
-| condition | `goal=` |
-|---|---|
-| no goal (this paper's primary regime) | `GoalConfig.no_goal()` |
-| goal, score hidden from the agent | `as_goal(task)` |
-| goal, score shown in the next observe phase | `as_goal(task, visibility=Visibility.OBSERVE)` |
-| goal + outer-loop rejection of regressions | `as_goal(task, selection="accept_reject")` |
-
-**Two workspaces, do not confuse them.** `harness/` is what evolves and what the rulers
-measure; `harness/task/` is what the agent was asked to work on. Task files land inside the
-harness workspace on purpose — every adapter already gives the agent file access there, so
-a benchmark needs no adapter change — but that means the measurement layer counts them as
-structure unless you exclude `TASK_SUBDIR`.
+A custom adapter used with benchmarks must expose `<run>/task/` to its agent while keeping
+it outside `harness/`; DSH and Pi demonstrate the container mount. The bundled `minimal`
+and `llm` harnesses prove evaluator plumbing but do not offer general file tools for solving
+arbitrary task workspaces.
 
 ### SWE-bench
 
 `proteus.bench.swe.swe_task("django__django-11133")` grades through the official harness
-(`make_test_spec` + `run_instance`), reporting the binary `resolved` as `passed` and the
-fail-to-pass fraction as `score` (a sparse 0/1 reward says little about *direction*, which
-is what an evolution study reads).
+(`make_test_spec` + `run_instance`). It reports the official binary `resolved` result as
+`passed` and the fail-to-pass fraction as a dense `score`.
 
-Written against the verified upstream API; **not yet executed** — it needs an x86_64 Linux
-box with ~120 GB free disk (per-instance images), `pip install swebench datasets docker`,
-and network for the first pull. Three constraints are load-bearing and documented in the
-module: the only bridge to the grader is `git diff base_commit` (so the task workspace must
-be that repo at that commit — `setup` clones it), the upstream cache keys on
-`(run_id, instance_id)` and ignores the patch (so the run id embeds the episode), and every
-distinct instance is another image (so pin a small fixed set).
+This integration is written against the verified upstream API but is not part of the live
+release gate: it needs an x86_64 Linux host, roughly 120 GB free disk for per-instance
+images, `pip install swebench datasets docker`, and network for the first pull. Its task
+workspace is the instance repository at `base_commit`; the only bridge to the grader is
+`git diff base_commit`, and the grader run id includes the episode because upstream caches
+on `(run_id, instance_id)` rather than patch content.
 
-## Goals and evaluators are separate decisions
+## Goals and evaluators are independent
 
-What you *tell* the agent and what you *measure* are independent. The goal is freeform
-text; evaluators attach on their own, each with its own visibility:
+`--goal` is arbitrary natural-language objective text. Each repeatable `--evaluator` is a
+separate measurement decision and is hidden by default; append `@observe` to show its result
+to the agent in the next episode's observe phase.
+
+Supported CLI evaluator forms:
+
+- measurement: `units:<surface>`, `tool-calls`, `step`
+- benchmark: `local:<task>`, `polyglot:<exercise>` (one benchmark per run)
+- custom: `contains:<relpath>:<needle>`
+
+A general goal such as “become more robust” needs no benchmark. A specific optimization
+claim does: if the goal says “optimize benchmark X”, attach X and make it `@observe`, or the
+agent has no measured feedback for the stated objective.
+
+## Your harness
 
 ```bash
-proteus run --harness llm \
-    --goal "Make yourself more robust." \
-    --evaluator units:notes@observe \
-    --evaluator step \
-    --arm neutral --seeds 2 --episodes 10 --out runs/robust
+proteus env scaffold --from <git-url-or-local-path> --name yours --ref <tag-or-sha>
+proteus env build yours
+# Implement the adapter contract in docs/ADAPTERS.md, then:
+proteus check --harness mypkg.yours_adapter:YoursHarness
+proteus check --harness mypkg.yours_adapter:YoursHarness --episode
 ```
-
-Every evaluator runs to completion between episodes — after episode N ends, before N+1
-starts. `@observe` results are shown to the agent at the start of its next episode;
-`@hidden` (the default) results go only to the run's records — progress lines,
-`eval_history.json`, and the tracking page — so the user always sees everything, and the
-agent sees exactly what the condition says it may.
-
-Two families of evaluator, because they answer different questions:
-
-- **measurement** — the study's own instruments: `units:<surface>` (what has been built),
-  `step` (structural movement since the previous episode), `tool-calls`. Cheap, intrinsic,
-  defined for every harness; a no-goal run is read entirely with these. Crystallization
-  stays a sweep-level probe rather than a per-episode evaluator: one administration is a
-  full LLM episode, so it is run at checkpoints, not between every pair of episodes.
-- **benchmark** — external ground truth: the local task pack (`proteus.bench.local`),
-  SWE-bench (`proteus.bench.swe`). Attach via the Python API (`as_goal(task, ...)`), which
-  also seeds the task into the workspace.
-
-A general goal ("more robust") needs no benchmark — the measurement evaluators will show
-what the harness did with the words. **A specific goal must come with its measure**: if
-the goal says "optimize SWE-bench", then SWE-bench must actually be attached as an
-evaluator and set `@observe`. A specific goal with no visible measure gives the agent an
-objective it can neither pursue nor verify, and what you get is drift toward whatever the
-text connotes rather than optimization of anything.

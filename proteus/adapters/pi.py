@@ -6,12 +6,13 @@ end of the harness spectrum: four built-in tools (read/write/edit/bash), native
 the adapter contract covers real third-party harnesses of any size — the whole adapter is
 symmetric with `dsh.py` and shares its disposition carrier.
 
-Per phase, one non-interactive pi session (`-p`) runs in the prepared image
-(`environments/pi/`), with the workspace at /workspace and session storage at /state
-(`--session-dir`). The trace is parsed from pi's session JSONL (v3: `message` events whose
-content blocks carry `toolCall` entries). Skills are loaded explicitly with
-`--skill /workspace/skills`, so the skills surface is version-robust rather than relying
-on discovery conventions.
+Per phase, one non-interactive pi session (`-p`) runs in the source-mode image from
+`environments/pi-src/`, with the workspace at `/workspace`, session/build state at
+`/state`, and an optional benchmark workspace at `/workspace/task`. Each run evolves the
+real Pi TypeScript source under `harness/src/`; the image exact-syncs and rebuilds it before
+boot. The trace is parsed from pi's session JSONL (v3: `message` events whose content blocks
+carry `toolCall` entries). Skills are loaded explicitly with `--skill /workspace/skills`,
+so the skills surface is version-robust rather than relying on discovery conventions.
 """
 
 from __future__ import annotations
