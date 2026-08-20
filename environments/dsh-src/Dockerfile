@@ -11,16 +11,14 @@ WORKDIR /opt/src
 # (the same reason runtime containers use host networking).
 RUN corepack enable && pnpm install --frozen-lockfile
 RUN npm run build:lib
+COPY .proteus-boot.sh /usr/local/bin/dsh-boot
+RUN chmod +x /usr/local/bin/dsh-boot
 RUN git archive --format=tar -o /opt/dsh-source.tar HEAD \
  && rm -rf /opt/src/.git \
  && tar -tf /opt/dsh-source.tar | grep -v '/$' > /opt/source-manifest.txt \
  && mkdir /tmp/pristine && tar -xf /opt/dsh-source.tar -C /tmp/pristine \
- && (cd /tmp/pristine && { find . -type f ! -path './node_modules/*' -print0 | sort -z \
-     | tee /tmp/.pl | xargs -0 cat; cat /tmp/.pl; } \
-     | sha256sum | cut -d' ' -f1) > /opt/pristine-hash \
- && rm -rf /tmp/pristine /tmp/.pl
-COPY .proteus-boot.sh /usr/local/bin/dsh-boot
-RUN chmod +x /usr/local/bin/dsh-boot
+ && dsh-boot --proteus-tree-hash /tmp/pristine > /opt/pristine-hash \
+ && rm -rf /tmp/pristine
 ENV DSH_HOME=/state
 ENV DSH_TELEMETRY_MODE=DISABLED
 # the boot wrapper syncs and rebuilds inside /opt/src as whatever uid the host runs

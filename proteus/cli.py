@@ -117,7 +117,7 @@ def _goal(spec: str, evaluators) -> GoalConfig:
 def _evaluator(spec: str, adapter_factory):
     """Parse one --evaluator: `<what>[@hidden|@observe]`. Returns (spec, task | None).
 
-    measurement: units:<surface> | tool-calls | step
+    measurement: units:<surface-name> | tool-calls | step
     benchmark:   local:<task> | polyglot:<exercise>   (seeds the task workspace too)
     custom:      contains:<relpath>:<needle>
     """
@@ -142,7 +142,17 @@ def _evaluator(spec: str, adapter_factory):
         return EvaluatorSpec(name=task.id, run=as_evaluator(task), kind="benchmark",
                              visibility=visibility), task
     if kind == "units" and arg:
-        return EvaluatorSpec(name=f"units:{arg}", run=ev.surface_units(arg),
+        surfaces = list(adapter_factory().surfaces())
+        surface = next((s for s in surfaces if s.name == arg), None)
+        # Accept the declared subdir too for compatibility with early v0.1 examples, but
+        # canonicalize the evaluator identity to the surface name in all records.
+        if surface is None:
+            surface = next((s for s in surfaces if s.subdir == arg), None)
+        if surface is None:
+            choices = ", ".join(s.name for s in surfaces) or "(none declared)"
+            raise SystemExit(
+                f"unknown surface {arg!r} for this harness; choose one of: {choices}")
+        return EvaluatorSpec(name=f"units:{surface.name}", run=ev.surface_units(surface),
                              kind="measurement", visibility=visibility), None
     if kind == "tool-calls":
         return EvaluatorSpec(name="tool-calls", run=ev.tool_calls(),
@@ -159,7 +169,8 @@ def _evaluator(spec: str, adapter_factory):
                                  visibility=visibility), None
     raise SystemExit(
         f"bad --evaluator {spec!r} "
-        "(use units:<surface> | tool-calls | step | local:<task> | polyglot:<exercise> "
+        "(use units:<surface-name> | tool-calls | step | local:<task> | "
+        "polyglot:<exercise> "
         "| contains:<relpath>:<needle>, with optional @hidden/@observe)")
 
 
@@ -192,6 +203,12 @@ def cmd_run(args) -> int:
         raise SystemExit(str(exc)) from None
     done = sum(r["episodes_complete"] for r in records)
     print(f"ran {len(records)} seeds, {done} episodes -> {args.out}")
+    failed = [r for r in records
+              if r.get("error") or r.get("episodes_complete", 0) < cfg.episodes]
+    if failed:
+        print(f"{len(failed)} seed(s) failed or stopped before {cfg.episodes} episodes",
+              file=sys.stderr)
+        return 1
     return 0
 
 
@@ -386,8 +403,8 @@ def main(argv=None) -> int:
                         "is specific (e.g. a benchmark), attach that benchmark as an "
                         "evaluator and set it @observe, or the agent cannot pursue it.")
     r.add_argument("--evaluator", action="append", metavar="SPEC",
-                   help="attach an evaluator, repeatable: units:<surface> | tool-calls | "
-                        "step | local:<task> | polyglot:<exercise> | "
+                   help="attach an evaluator, repeatable: units:<surface-name> | "
+                        "tool-calls | step | local:<task> | polyglot:<exercise> | "
                         "contains:<relpath>:<needle>, each with optional @hidden "
                         "(default) or @observe; at most one benchmark task per run")
     r.add_argument("--seeds", type=int, default=4)

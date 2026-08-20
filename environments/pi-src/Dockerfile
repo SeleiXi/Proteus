@@ -4,6 +4,8 @@
 FROM node:24-slim
 COPY . /opt/src
 WORKDIR /opt/src
+COPY .proteus-boot.sh /usr/local/bin/pi-boot
+RUN chmod +x /usr/local/bin/pi-boot
 # bake dependencies, pinned model data (the one network fetch), and the pristine build
 # model data is hydrated in the build context beforehand (one network fetch, pinned by
 # the context checkout) — hydrating inside the build hits overlayfs EXDEV on rename
@@ -15,12 +17,8 @@ RUN npm ci --no-audit --no-fund \
  && tar -tf /opt/pi-source.tar | sed 's|^src/||' | grep -v '/$' | grep -v '^$' \
         > /opt/source-manifest.txt \
  && mkdir /tmp/pristine && tar -xf /opt/pi-source.tar --strip-components=1 -C /tmp/pristine \
- && (cd /tmp/pristine && { find . -type f ! -path './node_modules/*' -print0 | sort -z \
-     | tee /tmp/.pl | xargs -0 cat; cat /tmp/.pl; } \
-     | sha256sum | cut -d' ' -f1) > /opt/pristine-hash \
- && rm -rf /tmp/pristine /tmp/.pl
-COPY .proteus-boot.sh /usr/local/bin/pi-boot
-RUN chmod +x /usr/local/bin/pi-boot
+ && pi-boot --proteus-tree-hash /tmp/pristine > /opt/pristine-hash \
+ && rm -rf /tmp/pristine
 # the boot wrapper syncs and rebuilds inside /opt/src as whatever uid the host runs
 # the container with — the tree must be writable by any user
 RUN chmod -R a+rwX /opt/src && chmod a+r /opt/pristine-hash /opt/source-manifest.txt \

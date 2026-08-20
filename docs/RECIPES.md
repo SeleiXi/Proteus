@@ -193,7 +193,7 @@ to the agent in the next episode's observe phase.
 
 Supported CLI evaluator forms:
 
-- measurement: `units:<surface>`, `tool-calls`, `step`
+- measurement: `units:<surface-name>`, `tool-calls`, `step`
 - benchmark: `local:<task>`, `polyglot:<exercise>` (one benchmark per run)
 - custom: `contains:<relpath>:<needle>`
 

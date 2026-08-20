@@ -25,6 +25,7 @@
   <a href="docs/ADAPTERS.md">Onboard Your Harness</a> •
   <a href="docs/RECIPES.md">Recipes</a> •
   <a href="docs/BENCHMARKS.md">Bring a Benchmark</a> •
+  <a href="docs/MEASUREMENTS.md">Add a Measurement</a> •
   <a href="environments/README.md">Environments</a> •
   <a href="#-measurement">Measurement</a>
 </p>
@@ -65,7 +66,7 @@ Three things set it apart from every existing harness-evolution system:
 ## 🚀 60-second demo (no API key, no Docker)
 
 ```bash
-pip install -e .            # dependency-free: even the live-LLM harness runs on stdlib
+pip install -e .            # no model SDK; Python 3.10 adds only a TOML compatibility package
 ```
 
 The bundled `minimal` harness runs fully offline, so you can see the whole pipeline before
@@ -233,6 +234,10 @@ from proteus.measure import distance, stream, crystallize
   permutation test `R`.
 - `crystallize` — mount an evolved state under a neutral disposition and test whether it
   reads back as its own endpoint (two-stage fidelity + arm-shift).
+
+To add a per-episode measurement evaluator, a post-run statistic, or an adapter-native
+counter, see [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md). The guide covers their different
+contracts, artifact boundaries, CLI/report integration, statistical rules, and tests.
 
 ## 📤 Outputs
 

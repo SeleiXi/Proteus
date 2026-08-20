@@ -179,3 +179,55 @@ def test_cli_attaches_a_benchmark_evaluator_with_its_task():
     # measurement evaluators carry no task
     spec2, task2 = _evaluator("tool-calls", lambda: None)
     assert spec2.kind == "measurement" and task2 is None
+
+
+def test_surface_units_uses_declared_unit_and_supports_file_surfaces(tmp_path):
+    from proteus.core.adapter import Surface
+    from proteus.core.goal import GoalContext
+
+    instructions = Surface("instructions", "AGENTS.md")
+    (tmp_path / "AGENTS.md").write_text("Be useful.\n")
+    result = surface_units(instructions)([], GoalContext(str(tmp_path), 1))
+    assert result.name == "units:instructions" and result.score == 1
+
+    skills = Surface("skills", "skills", unit="directory")
+    (tmp_path / "skills" / "alpha").mkdir(parents=True)
+    (tmp_path / "skills" / "alpha" / "SKILL.md").write_text("# Alpha\n")
+    (tmp_path / "skills" / "alpha" / "helper.py").write_text("pass\n")
+    result = surface_units(skills)([], GoalContext(str(tmp_path), 1))
+    assert result.score == 1, "one skill directory is one declared unit"
+
+
+def test_cli_units_resolves_surface_name_and_legacy_subdir(tmp_path):
+    from proteus.cli import _evaluator
+    from proteus.core.adapter import Surface
+    from proteus.core.goal import GoalContext
+
+    class Declared:
+        def surfaces(self):
+            return (Surface("instructions", "AGENTS.md"), Surface("loop", "src"))
+
+    (tmp_path / "AGENTS.md").write_text("Be useful.\n")
+    named, task = _evaluator("units:instructions", Declared)
+    assert task is None and named.name == "units:instructions"
+    assert named.run([], GoalContext(str(tmp_path), 1)).score == 1
+
+    legacy, _ = _evaluator("units:src", Declared)
+    assert legacy.name == "units:loop", "subdir input must canonicalize to surface name"
+
+
+def test_cli_run_returns_failure_when_an_episode_fails(tmp_path):
+    from unittest.mock import patch
+
+    from proteus import cli
+    from proteus.core.adapter import EpisodeResult
+
+    class FailingHarness(MinimalHarness):
+        def run_episode(self, spec):
+            return EpisodeResult(episode=spec.episode, ok=False, error="boom")
+
+    with patch.object(cli, "_harness_factory", return_value=FailingHarness):
+        rc = cli.main(["run", "--harness", "minimal", "--arm", "neutral",
+                       "--seeds", "1", "--episodes", "1",
+                       "--out", str(tmp_path / "failed")])
+    assert rc == 1

@@ -5,12 +5,71 @@
 # in the workspace is removed before the overlay), rebuilt with the project's own
 # toolchain when the source hash changes, and the built CLI is exec'd.
 #
-# The hash covers paths AND contents (the NUL-separated path list is appended to the
-# concatenated bytes): a rename, an empty file, or a deletion always changes it. An
+# The hash covers length-framed paths AND per-file contents (plus symlink targets): a
+# rename, an empty file, a deletion, or a boundary-preserving multi-file edit changes it. An
 # untouched copy takes the pristine fast path with no copying at all. Build outputs are
 # cached on /state keyed by the hash. The overlay excludes an agent-installed
 # node_modules so it cannot shadow the baked dependencies.
 set -e
+
+# Keep this byte-for-byte equivalent to dsh-src/boot.sh's tree_hash. Each path and
+# payload is length-framed, so moving bytes between files cannot collide; symlink targets
+# are included instead of silently disappearing from the source identity.
+tree_hash() {
+    node - "$1" <<'JS'
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+
+const root = path.resolve(process.argv[2]);
+const hash = crypto.createHash("sha256");
+
+function record(kind, relative, payload) {
+    const name = Buffer.from(relative, "utf8");
+    hash.update(kind);
+    hash.update("\0");
+    hash.update(String(name.length));
+    hash.update("\0");
+    hash.update(name);
+    hash.update("\0");
+    hash.update(String(payload.length));
+    hash.update("\0");
+    hash.update(payload);
+    hash.update("\0");
+}
+
+function walk(directory, relative = "") {
+    const entries = fs.readdirSync(directory, {withFileTypes: true}).sort(
+        (a, b) => Buffer.compare(Buffer.from(a.name), Buffer.from(b.name))
+    );
+    for (const entry of entries) {
+        if (entry.name === "node_modules") continue;
+        const childRelative = relative ? `${relative}/${entry.name}` : entry.name;
+        const child = path.join(directory, entry.name);
+        const stat = fs.lstatSync(child);
+        if (stat.isSymbolicLink()) {
+            record("L", childRelative, Buffer.from(fs.readlinkSync(child), "utf8"));
+        } else if (stat.isDirectory()) {
+            walk(child, childRelative);
+        } else if (stat.isFile()) {
+            record(stat.mode & 0o111 ? "X" : "F", childRelative, fs.readFileSync(child));
+        } else {
+            throw new Error(`unsupported source entry: ${childRelative}`);
+        }
+    }
+}
+
+walk(root);
+process.stdout.write(hash.digest("hex") + "\n");
+JS
+}
+
+if [ "${1:-}" = "--proteus-tree-hash" ]; then
+    [ "$#" -eq 2 ] || { echo "usage: $0 --proteus-tree-hash DIR" >&2; exit 2; }
+    tree_hash "$2"
+    exit 0
+fi
+
 # the container may run as an arbitrary host uid: give npm a writable HOME
 export HOME=/tmp
 SRC=/opt/src
@@ -19,16 +78,8 @@ DISTS="packages/tui/dist packages/telemetry/dist packages/ai/dist packages/agent
 packages/session-backends/sqlite-node/dist packages/protocol/dist packages/client/dist \
 packages/server/dist packages/coding-agent/dist"
 
-src_hash() {
-    (cd /workspace/src && {
-        find . -type f ! -path './node_modules/*' -print0 | sort -z \
-            | tee /tmp/.pathlist | xargs -0 cat
-        cat /tmp/.pathlist
-    } | sha256sum | cut -d' ' -f1)
-}
-
 if [ -d /workspace/src/packages ]; then
-    HASH=$(src_hash)
+    HASH=$(tree_hash /workspace/src)
     if [ "$HASH" = "$(cat /opt/pristine-hash)" ]; then
         :   # untouched source: the baked tree and build are exactly this source
     else
@@ -42,8 +93,8 @@ if [ -d /workspace/src/packages ]; then
         # files-only archive: a directory ENTRY makes tar chmod/utime that directory
         # on extraction, which a non-root uid cannot do to the baked root-owned tree.
         # File entries create missing parents quietly and touch nothing that exists.
-        (cd /workspace/src && find . -type f ! -path './node_modules/*' -print0 \
-            | tar -cf - --null -T -) \
+        (cd /workspace/src && find . -name node_modules -prune -o \
+            \( -type f -o -type l \) -print0 | tar -cf - --null -T -) \
             | tar -xf - -m --no-same-permissions -C "$SRC"
         if [ -f "/state/dist-$HASH.tar" ]; then
             tar -xf "/state/dist-$HASH.tar" -m --no-same-permissions -C "$SRC"

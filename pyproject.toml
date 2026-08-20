@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Proteus Authors" }]
 keywords = ["agents", "self-evolution", "harness", "llm", "self-improving"]
-dependencies = []
+dependencies = ["tomli>=2.0; python_version < '3.11'"]
 
 [project.optional-dependencies]
 llm = []  # the llm harness uses stdlib urllib; no SDK needed

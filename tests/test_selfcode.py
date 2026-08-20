@@ -7,6 +7,7 @@ need Docker and run in the release smoke; these cover the adapter logic with a f
 sandbox.
 """
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -96,6 +97,49 @@ def test_reseeding_never_overwrites_evolved_code(tmp_path):
     # the real guard lives in _extract_self_code itself: non-empty src is left alone
     real._extract_self_code(h / "src")
     assert (h / "src" / "lib" / "code.js").read_text() == "// evolved by the agent\n"
+
+
+def test_source_hash_frames_file_boundaries_and_symlinks(tmp_path):
+    """Different exact trees must never share a build-cache identity."""
+    if shutil.which("node") is None:
+        return  # the runtime images always carry Node; keep the Python-only runner usable
+
+    left, right = tmp_path / "left", tmp_path / "right"
+    left.mkdir()
+    right.mkdir()
+    (left / "one").write_text("ab")
+    (left / "two").write_text("c")
+    (right / "one").write_text("a")
+    (right / "two").write_text("bc")
+
+    scripts = (Path("environments/dsh-src/boot.sh"),
+               Path("environments/pi-src/boot.sh"))
+
+    def digest(script, root):
+        return subprocess.run(
+            ["sh", str(script), "--proteus-tree-hash", str(root)],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+    for script in scripts:
+        assert digest(script, left) != digest(script, right), \
+            f"{script}: file-boundary edit collided"
+        clean = digest(script, left)
+        (left / "node_modules").mkdir()
+        (left / "node_modules" / "untrusted.js").write_text("shadow baked dependencies")
+        assert digest(script, left) == clean, f"{script}: node_modules entered source hash"
+        shutil.rmtree(left / "node_modules")
+        regular = digest(script, left)
+        (left / "one").chmod(0o744)
+        assert digest(script, left) != regular, f"{script}: executable bit was not hashed"
+        (left / "one").chmod(0o644)
+        link = left / "link"
+        link.unlink(missing_ok=True)
+        link.symlink_to("one")
+        before = digest(script, left)
+        link.unlink()
+        link.symlink_to("two")
+        assert digest(script, left) != before, f"{script}: symlink target was not hashed"
 
 
 # ------------------------------------------------------------------- turn budget

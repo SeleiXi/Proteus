@@ -4,6 +4,9 @@ A benchmark in Proteus is a **goal with a grader**: the agent is told what to pu
 between episodes the grader scores what is actually in the workspace. The whole contract
 is one `BenchTask` — three things:
 
+If you only need to observe the harness or compare runs—without seeding an exercise—add a
+[measurement](MEASUREMENTS.md) instead.
+
 ```python
 BenchTask(
     id="yourbench:task-17",
