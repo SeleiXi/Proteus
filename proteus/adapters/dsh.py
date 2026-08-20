@@ -211,19 +211,24 @@ class DshHarness:
         episode_dirs: set = set()
         if (harness / "src").is_dir():
             error = self.check_boot(harness)
-        for phase in PHASES if not error else ():
+        min_pp = int(getattr(spec, "min_turns_per_phase", 0) or 0)
+        for idx, phase in enumerate(PHASES if not error else ()):
             # the budget is enforced twice, both harness-agnostically: exactly, between
             # phases (no new phase once it is spent) and approximately, mid-phase (the
-            # session log is polled and the container stopped when the count crosses it)
+            # session log is polled and the container stopped at the phase's stop line).
+            # The stop line reserves min_turns_per_phase for every later phase, so a
+            # reservation stop moves to the next phase; only a spent budget ends the
+            # episode.
             if budget and self._live_calls(state, episode_dirs, set()) >= budget:
                 capped = True
                 break
+            stop_at = budget - min_pp * (len(PHASES) - idx - 1) if budget else 0
             before = self._session_dirs(state)
             fired = [False]
 
-            def stop_check(before=before, fired=fired):
-                if self._live_calls(state, episode_dirs, 
-                                    self._session_dirs(state) - before) >= budget:
+            def stop_check(before=before, fired=fired, stop_at=stop_at):
+                if self._live_calls(state, episode_dirs,
+                                    self._session_dirs(state) - before) >= stop_at:
                     fired[0] = True
                     return True
                 return False
@@ -247,8 +252,12 @@ class DshHarness:
                 episode_dirs |= new
             if proc.returncode != 0:
                 if fired[0]:
-                    capped = True      # stopped by the budget: a cap, not a failure
-                    break
+                    # stopped at the phase's line: continue if it was only the reserve,
+                    # end the episode only when the whole budget is spent
+                    if budget and self._live_calls(state, episode_dirs, set()) >= budget:
+                        capped = True
+                        break
+                    continue
                 error = f"phase {phase}: exit {proc.returncode}: {proc.stderr[-400:]}"
                 break
         (run_root / "traces" / f"ep{spec.episode:03d}.json").write_text(

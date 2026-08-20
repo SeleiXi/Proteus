@@ -119,13 +119,18 @@ class LLMHarness(MinimalHarness):
         tokens_in = tokens_out = 0
         error = ""
         capped = False
+        min_pp = int(getattr(spec, "min_turns_per_phase", 0) or 0)
         with trace_path.open("w", encoding="utf-8") as sink:
-            for phase in PHASES:
-                # `max_turns` bounds the whole episode, model calls included: without it a
-                # verbose model sets the cost per episode, not the caller
-                if capped or (spec.max_turns and turn >= spec.max_turns):
+            for idx, phase in enumerate(PHASES):
+                # `max_turns` bounds the whole episode, model calls included; the phase
+                # stop line additionally reserves min_turns_per_phase for later phases,
+                # and reaching it ends the phase, not the episode
+                if spec.max_turns and turn >= spec.max_turns:
                     capped = True
+                if capped:
                     break
+                stop_at = (spec.max_turns - min_pp * (len(PHASES) - idx - 1)
+                           if spec.max_turns else 0)
                 prompt = spec.phase_prompts.get(phase, "")
                 user = (f"Episode {spec.episode}, phase: {phase}.\n\n"
                         f"{prompt}\n\nCurrent harness state:\n{_render_state(harness)}")
@@ -142,8 +147,8 @@ class LLMHarness(MinimalHarness):
                 sink.write(json.dumps({"turn": turn, "phase": phase, "tool": None,
                                        "surface": None, "text": reply[:500]}) + "\n")
                 for act in _parse_actions(reply):
-                    if spec.max_turns and turn >= spec.max_turns:
-                        capped = True
+                    if spec.max_turns and turn >= stop_at:
+                        capped = turn >= spec.max_turns
                         break
                     tool = act.get("tool", "")
                     name = "".join(c for c in str(act.get("name", "unnamed"))

@@ -160,6 +160,7 @@ def cmd_run(args) -> int:
         model=args.model,
         episodes=args.episodes,
         max_turns=args.max_turns,
+        min_turns_per_phase=args.min_turns_per_phase,
         announce_budget=args.announce_budget,
         on_existing=args.on_existing,
     )
@@ -369,6 +370,10 @@ def main(argv=None) -> int:
     r.add_argument("--seeds", type=int, default=4)
     r.add_argument("--episodes", type=int, default=10)
     r.add_argument("--max-turns", type=int, default=100)
+    r.add_argument("--min-turns-per-phase", type=int, default=0,
+                   help="reserve at least this many turns for every phase: a phase that "
+                        "would starve the later ones is ended early (max-turns must be "
+                        ">= 4x this)")
     r.add_argument("--announce-budget", action="store_true",
                    help="tell the agent its per-episode tool-call budget in every phase "
                         "prompt (recorded in the manifest; announcing changes behaviour)")

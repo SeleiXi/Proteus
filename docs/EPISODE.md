@@ -71,7 +71,10 @@ adapter's:
   between phases** (no new phase once the budget is spent) and **approximately
   mid-phase** (the session log is polled live — pi's is plain JSONL, dsh's flushes one
   zstd frame per event — and the container is stopped when the count crosses the
-  budget). A budget stop records `turn_capped`, not an error: files already written
+  budget). `min_turns_per_phase` additionally reserves turns for later phases: while
+  phase i runs, its stop line is `max_turns - min_turns_per_phase x phases_after_i`, and
+  reaching the line ends the phase, not the episode — so a greedy observe cannot starve
+  act. A budget stop records `turn_capped`, not an error: files already written
   persist, the episode snapshots normally, the run continues. `phase_timeout_s` remains
   the wall-clock backstop. With `announce_budget`, the agent is also *told* its budget
   in every phase prompt, so it can plan within it — off by default, because announcing

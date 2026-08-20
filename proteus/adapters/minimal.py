@@ -93,17 +93,19 @@ class MinimalHarness:
         turn = 0
         writes = {"notes": 0, "tools": 0}
         capped = False
+        min_pp = int(getattr(spec, "min_turns_per_phase", 0) or 0)
         with trace_path.open("w", encoding="utf-8") as sink:
-            for phase in PHASES:
+            for idx, phase in enumerate(PHASES):
                 if capped:
                     break
+                # the phase's stop line reserves min_turns_per_phase for every later
+                # phase; reaching it ends THIS phase, only a spent budget ends the episode
+                stop_at = (spec.max_turns - min_pp * (len(PHASES) - idx - 1)
+                           if spec.max_turns else 0)
                 prompt = spec.phase_prompts.get(phase, "")
                 for tool, surface, text in self.policy(phase, prompt, spec.episode, rng):
-                    # `max_turns` is the per-episode iteration budget the caller set; it is
-                    # a real stop, not advice, so cost per episode is bounded no matter what
-                    # the policy (or a model) decides to do
-                    if spec.max_turns and turn >= spec.max_turns:
-                        capped = True
+                    if spec.max_turns and turn >= stop_at:
+                        capped = turn >= spec.max_turns
                         break
                     turn += 1
                     if tool == "write_note":
@@ -119,7 +121,7 @@ class MinimalHarness:
                         "surface": surface, "text": text,
                     }) + "\n")
         return EpisodeResult(episode=spec.episode, ok=True, turns=turn,
-                             counters={"writes": writes})
+                             counters={"writes": writes, "turn_capped": capped})
 
     def read_trace(self, root: Path, episode: int) -> Sequence[ActionEvent]:
         path = root / "traces" / f"ep{episode:03d}.jsonl"

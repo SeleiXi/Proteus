@@ -21,3 +21,5 @@ docker build -f environments/pi-src/Dockerfile -t proteus-env-pi-src:0.84.2 /tmp
 ```
 
 Attribution: pi-mono (github.com/badlogic/pi-mono), MIT.
+
+Known issue: the boot wrapper syncs `/workspace/src/.` over the baked tree without excluding a `node_modules/` the agent may have installed into its own source, which can shadow the baked dependencies. Until the wrapper excludes it (needs an image rebake), instruct agents not to install dependencies into `src/`.

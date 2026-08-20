@@ -45,6 +45,9 @@ class RunConfig:
     model: str
     episodes: int = 30
     max_turns: int = 100
+    min_turns_per_phase: int = 0
+    """Per-phase floor on the turn budget (see EpisodeSpec). `max_turns` must be at
+    least `len(PHASES) * min_turns_per_phase`."""
     seed: int = 0
     task: object | None = None
     """A `proteus.bench.BenchTask` to seed into the harness before episode 1, for
@@ -90,6 +93,9 @@ def _phase_prompts(cfg: RunConfig, prior_feedback: str) -> dict[str, str]:
     if cfg.announce_budget and cfg.max_turns:
         note = (f"Budget: you have at most {cfg.max_turns} tool calls in this episode, "
                 "across all phases. Plan within it; the episode ends when it is spent.")
+        if cfg.min_turns_per_phase:
+            note += (f" Each later phase reserves at least {cfg.min_turns_per_phase} "
+                     "of them; a phase may be ended early to protect that reserve.")
         for ph in PHASES:
             prompts[ph] = f"{note}\n\n{prompts[ph]}"
     # the disposition contributes its (per-phase) text — unless the adapter already carries
@@ -149,6 +155,11 @@ def run(cfg: RunConfig, start: int = 0) -> RunResult:
     real trajectory, which is why this exists.
     """
     harness = cfg.root / "harness"
+    if cfg.max_turns and cfg.min_turns_per_phase * len(PHASES) > cfg.max_turns:
+        raise ValueError(
+            f"max_turns={cfg.max_turns} cannot honour min_turns_per_phase="
+            f"{cfg.min_turns_per_phase}: {len(PHASES)} phases need at least "
+            f"{cfg.min_turns_per_phase * len(PHASES)} turns")
     if start:
         if completed_episodes(cfg) < start:
             raise ValueError(
@@ -174,6 +185,7 @@ def run(cfg: RunConfig, start: int = 0) -> RunResult:
             root=cfg.root, episode=ep, model=cfg.model,
             phase_prompts=_phase_prompts(cfg, prior_feedback),
             max_turns=cfg.max_turns, seed=cfg.seed,
+            min_turns_per_phase=cfg.min_turns_per_phase,
         )
         try:
             res = cfg.adapter.run_episode(spec)

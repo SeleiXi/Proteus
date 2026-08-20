@@ -57,6 +57,10 @@ def main() -> int:
     ap.add_argument("root")
     ap.add_argument("--harness", required=True)
     ap.add_argument("--max-turns", type=int, default=10)
+    ap.add_argument("--require-self-edit", action="store_true",
+                    help="fail unless the agent edited its own src/ during the run AND "
+                         "the boot used the rebuilt copy (dist cache keyed by the "
+                         "current source hash)")
     args = ap.parse_args()
 
     from proteus.cli import _adapter_factory
@@ -138,6 +142,31 @@ def main() -> int:
             patterns = ("packages/*/src/cli.ts", "apps/*/src/bin.ts",
                         "packages/*/src/*.ts", "packages/*/*/src/*.ts",
                         "apps/*/src/*.ts", "lib/*.js")
+            if args.require_self_edit:
+                # 1) the agent edited its own source before the final episode, so at
+                # least one later boot loaded the edit
+                diff = subprocess.run(
+                    ["git", "--git-dir", str(git_dir), "diff", "--name-only",
+                     f"HEAD~{episodes}", "HEAD~1", "--", "src/"],
+                    capture_output=True, text=True, errors="replace", check=False).stdout
+                edited = [line for line in diff.splitlines()
+                          if line.strip() and "node_modules" not in line]
+                check(bool(edited), "the agent edited its own source before the last episode",
+                      "no src/ change between episode 0 and the second-to-last snapshot")
+                # 2) machine evidence the edited source was rebuilt and booted: the boot
+                # wrapper writes a dist cache tar only when it builds a non-pristine
+                # source, and a boot right now must hit that cache rather than rebuild
+                state = next((d for d in run_root.iterdir()
+                              if d.is_dir() and d.name.endswith("-state")), None)
+                tars_before = set(state.glob("dist-*.tar")) if state else set()
+                check(bool(tars_before),
+                      "a rebuild happened during the run (dist cache exists)")
+                boot_msg = adapter.check_boot(run_root / "harness")
+                tars_after = set(state.glob("dist-*.tar")) if state else set()
+                check(boot_msg == "" and tars_after == tars_before,
+                      "booting the final source hits the cache (it was built and "
+                      "loaded during the run)",
+                      boot_msg or f"new tars: {[t.name for t in tars_after - tars_before]}")
             victims = [v for pat in patterns for v in sorted(src.glob(pat))]
             if victims:
                 victim = victims[0]

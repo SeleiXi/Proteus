@@ -169,3 +169,74 @@ def test_announced_budget_reaches_every_phase_prompt(tmp_path):
                     goal=GoalConfig(), root=tmp_path, model="mock", max_turns=12)
     q = _phase_prompts(off, "")
     assert all("tool calls in this episode" not in q[ph] for ph in PHASES)
+
+
+# ------------------------------------------------------------- per-phase reservation
+
+def test_reservation_forces_every_phase_to_run(tmp_path):
+    # a policy that would spend the whole budget in observe must be cut at the stop
+    # line so propose/act/reflect still get their reserved turns
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core import NEUTRAL, GoalConfig
+    from proteus.core.episode import RunConfig, run
+
+    def greedy(phase, prompt, episode, rng):
+        return [("read_state", None, f"{phase}-{i}") for i in range(50)]
+
+    adapter = MinimalHarness(policy=greedy)
+    cfg = RunConfig(name="t", adapter=adapter, disposition=NEUTRAL, goal=GoalConfig(),
+                    root=tmp_path / "r", model="mock", episodes=1, seed=1,
+                    max_turns=8, min_turns_per_phase=2)
+    res = run(cfg)
+    trace = adapter.read_trace(tmp_path / "r", 1)
+    by_phase = {}
+    for e in trace:
+        by_phase[e.phase] = by_phase.get(e.phase, 0) + 1
+    assert set(by_phase) == {"observe", "propose", "act", "reflect"}, \
+        f"a phase starved: {by_phase}"
+    assert by_phase["observe"] == 2, f"observe ran past its stop line: {by_phase}"
+    assert sum(by_phase.values()) <= 8
+    assert res.episodes_complete == 1
+
+
+def test_reservation_stop_is_not_an_episode_end_for_containers(tmp_path):
+    # a mid-phase kill at the reservation line must move to the next phase, and only a
+    # spent budget ends the episode
+    from proteus.core.adapter import EpisodeSpec
+    for i, cls in enumerate((DshHarness, PiHarness)):
+        sandbox = FakeSandbox()
+        a = cls(key="x", sandbox=sandbox)
+        # scripted counts: launch checks say under budget; each phase's mid-phase read
+        # sits exactly on its reservation line until the last, which spends the budget
+        # three reads per fired phase: launch check, mid-phase stop, budget re-check
+        script = iter([0, 2, 2,      # phase 1 (stop_at=8-6=2), re-check under budget
+                       2, 4, 4,      # phase 2 (stop_at=4)
+                       4, 6, 6,      # phase 3 (stop_at=6)
+                       6, 8, 8])     # phase 4 (stop_at=8), re-check spends the budget
+        a._live_calls = lambda *args, **kw: next(script, 8)
+        h = tmp_path / f"h{i}"
+        _seed_with_fake_src(a, h, ())
+        root = tmp_path / f"r{i}"
+        root.mkdir()
+        (root / "harness").symlink_to(h)
+        res = a.run_episode(EpisodeSpec(root=root, episode=1, model="m", phase_prompts={},
+                                        max_turns=8, min_turns_per_phase=2))
+        phases = [c for c in sandbox.calls if c["command"] != ["--version"]]
+        assert len(phases) == 4, \
+            f"{cls.__name__}: reservation stop ended the episode after {len(phases)} phases"
+        assert res.ok and res.counters["turn_capped"], cls.__name__
+
+
+def test_budget_must_cover_the_reserves(tmp_path):
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core import NEUTRAL, GoalConfig
+    from proteus.core.episode import RunConfig, run
+    cfg = RunConfig(name="t", adapter=MinimalHarness(), disposition=NEUTRAL,
+                    goal=GoalConfig(), root=tmp_path / "r", model="mock", episodes=1,
+                    max_turns=7, min_turns_per_phase=2)
+    try:
+        run(cfg)
+    except ValueError as exc:
+        assert "min_turns_per_phase" in str(exc)
+    else:
+        raise AssertionError("a budget below 4x the reserve must be refused")

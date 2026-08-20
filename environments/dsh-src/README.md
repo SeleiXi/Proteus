@@ -29,3 +29,5 @@ the copy on the pristine path is safe (byte-identical by definition) but require
 the cache-hit path, where runtime-read files (`config/`) must still be synced.
 
 Attribution: deepseek-harness (github.com/deepseek-ai/deepseek-harness), MIT.
+
+Known issue: the boot wrapper syncs `/workspace/src/.` over the baked tree without excluding a `node_modules/` the agent may have installed into its own source, which can shadow the baked dependencies. Until the wrapper excludes it (needs an image rebake), instruct agents not to install dependencies into `src/`.

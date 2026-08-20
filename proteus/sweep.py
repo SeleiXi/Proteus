@@ -31,6 +31,7 @@ class SweepConfig:
     model: str = "mock"
     episodes: int = 30
     max_turns: int = 100
+    min_turns_per_phase: int = 0
     announce_budget: bool = False
     on_existing: str = "refuse"
     """What to do when a run root is already there: "refuse" (default), "resume", or
@@ -121,6 +122,7 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
                     name=arm.label, adapter=cfg.adapter_factory(), disposition=arm,
                     goal=cfg.goal, root=run_root, model=cfg.model,
                     episodes=cfg.episodes, max_turns=cfg.max_turns, seed=s,
+                    min_turns_per_phase=cfg.min_turns_per_phase,
                     announce_budget=cfg.announce_budget,
                     progress_path=cfg.root / "progress" / f"{rid}.jsonl",
                 )
