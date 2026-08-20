@@ -73,7 +73,9 @@ jobs:
           from proteus.bench.polyglot import polyglot_task
           from proteus.core.episode import RunConfig, run
           from proteus.core.disposition import NEUTRAL
-          task = polyglot_task("two-fer")
+          # bowling exists in the real dataset (34 curated exercises; two-fer does
+          # not — it is only in the fabricated test fixture)
+          task = polyglot_task("bowling")
           cfg = RunConfig(name="bench", adapter=MinimalHarness(), disposition=NEUTRAL,
                           goal=as_goal(task), root=Path("/tmp/rc/bench"), model="mock",
                           episodes=2, task=task)
