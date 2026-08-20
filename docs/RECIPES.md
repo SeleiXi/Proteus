@@ -3,14 +3,20 @@
 Copy-paste paths from a checkout of Proteus to measured self-evolution. The pinned Pi and
 DeepSeek Harness paths below are the same paths exercised by `release-smoke.yml`.
 
-## Install Proteus from source
+## Install Proteus
 
-Proteus is not published on PyPI yet:
+Install the release from PyPI:
+
+```bash
+python3 -m pip install proteus-evolve
+```
+
+Clone the repository as well when a recipe uses the checked-in Dockerfiles or boot
+wrappers under `environments/`:
 
 ```bash
 git clone https://github.com/proteus-evolve/Proteus.git
 cd Proteus
-python3 -m pip install -e .
 ```
 
 The offline reference harness needs no API key or Docker:

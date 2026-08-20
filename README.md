@@ -66,7 +66,7 @@ Three things set it apart from every existing harness-evolution system:
 ## 🚀 60-second demo (no API key, no Docker)
 
 ```bash
-pip install -e .            # no model SDK; Python 3.10 adds only a TOML compatibility package
+pip install proteus-evolve  # no model SDK; Python 3.10 adds only a TOML compatibility package
 ```
 
 The bundled `minimal` harness runs fully offline, so you can see the whole pipeline before
