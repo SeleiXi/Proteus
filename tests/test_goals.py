@@ -168,3 +168,14 @@ def test_run_sums_numeric_counters(tmp_path):
     res = run(cfg)
     assert res.counters == {"tokens_in": 300, "tokens_out": 21}, \
         "numeric counters must sum across episodes; nested dicts stay out"
+
+
+def test_cli_attaches_a_benchmark_evaluator_with_its_task():
+    from proteus.cli import _evaluator
+    spec, task = _evaluator("local:interval-merge@observe", lambda: None)
+    assert spec.kind == "benchmark" and spec.visibility.value == "observe"
+    assert task is not None and task.id == "local:interval-merge"
+    assert spec.name == task.id
+    # measurement evaluators carry no task
+    spec2, task2 = _evaluator("tool-calls", lambda: None)
+    assert spec2.kind == "measurement" and task2 is None

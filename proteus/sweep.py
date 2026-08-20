@@ -31,6 +31,9 @@ class SweepConfig:
     model: str = "mock"
     episodes: int = 30
     max_turns: int = 100
+    task: object | None = None
+    """A `BenchTask` to seed into every run (set automatically when a benchmark
+    evaluator is attached)."""
     min_turns_per_phase: int = 0
     announce_budget: bool = False
     on_existing: str = "refuse"
@@ -128,7 +131,7 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
                     goal=cfg.goal, root=run_root, model=cfg.model,
                     episodes=cfg.episodes, max_turns=cfg.max_turns, seed=s,
                     min_turns_per_phase=cfg.min_turns_per_phase,
-                    announce_budget=cfg.announce_budget,
+                    announce_budget=cfg.announce_budget, task=cfg.task,
                     progress_path=cfg.root / "progress" / f"{rid}.jsonl",
                 )
                 res = run(rc, start=start)

@@ -113,11 +113,13 @@ def _goal(spec: str, evaluators) -> GoalConfig:
 
 
 def _evaluator(spec: str, adapter_factory):
-    """Parse one --evaluator: `<what>[@hidden|@observe]`.
+    """Parse one --evaluator: `<what>[@hidden|@observe]`. Returns (spec, task | None).
 
     measurement: units:<surface> | tool-calls | step
-    benchmark/custom: contains:<relpath>:<needle>
+    benchmark:   local:<task> | polyglot:<exercise>   (seeds the task workspace too)
+    custom:      contains:<relpath>:<needle>
     """
+    from proteus.bench.task import as_evaluator
     from proteus.core import EvaluatorSpec, Visibility
     from proteus.core import evaluators as ev
     body, _, vis = spec.partition("@")
@@ -125,31 +127,48 @@ def _evaluator(spec: str, adapter_factory):
         raise SystemExit(f"bad --evaluator {spec!r}: visibility is @hidden or @observe")
     visibility = Visibility(vis) if vis else Visibility.HIDDEN
     kind, _, arg = body.partition(":")
+    if kind in ("local", "polyglot") and arg:
+        try:
+            if kind == "local":
+                from proteus.bench.local import local_task
+                task = local_task(f"local:{arg}")
+            else:
+                from proteus.bench.polyglot import polyglot_task
+                task = polyglot_task(arg)
+        except KeyError as exc:
+            raise SystemExit(str(exc)) from None
+        return EvaluatorSpec(name=task.id, run=as_evaluator(task), kind="benchmark",
+                             visibility=visibility), task
     if kind == "units" and arg:
         return EvaluatorSpec(name=f"units:{arg}", run=ev.surface_units(arg),
-                             kind="measurement", visibility=visibility)
+                             kind="measurement", visibility=visibility), None
     if kind == "tool-calls":
         return EvaluatorSpec(name="tool-calls", run=ev.tool_calls(),
-                             kind="measurement", visibility=visibility)
+                             kind="measurement", visibility=visibility), None
     if kind == "step":
         surfaces = adapter_factory().surfaces()
         return EvaluatorSpec(name="structural-step", run=ev.structural_step(surfaces),
-                             kind="measurement", visibility=visibility)
+                             kind="measurement", visibility=visibility), None
     if kind == "contains":
         relpath, _, needle = arg.partition(":")
         if relpath and needle:
             return EvaluatorSpec(name=f"contains:{relpath}", kind="custom",
                                  run=ev.file_contains(relpath, needle),
-                                 visibility=visibility)
+                                 visibility=visibility), None
     raise SystemExit(
         f"bad --evaluator {spec!r} "
-        "(use units:<surface> | tool-calls | step | contains:<relpath>:<needle>, "
-        "with optional @hidden/@observe)")
+        "(use units:<surface> | tool-calls | step | local:<task> | polyglot:<exercise> "
+        "| contains:<relpath>:<needle>, with optional @hidden/@observe)")
 
 
 def cmd_run(args) -> int:
     factory = _harness_factory(args)
-    evaluators = tuple(_evaluator(e, factory) for e in (args.evaluator or ()))
+    parsed = [_evaluator(e, factory) for e in (args.evaluator or ())]
+    evaluators = tuple(spec for spec, _ in parsed)
+    tasks = [task for _, task in parsed if task is not None]
+    if len(tasks) > 1:
+        raise SystemExit("only one benchmark evaluator per run: each run has one task "
+                         f"workspace, and {len(tasks)} were attached")
     cfg = SweepConfig(
         name=args.out,
         adapter_factory=factory,
@@ -160,6 +179,7 @@ def cmd_run(args) -> int:
         model=args.model,
         episodes=args.episodes,
         max_turns=args.max_turns,
+        task=(tasks[0] if tasks else None),
         min_turns_per_phase=args.min_turns_per_phase,
         announce_budget=args.announce_budget,
         on_existing=args.on_existing,
