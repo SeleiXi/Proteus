@@ -10,10 +10,15 @@ WORKDIR /opt/src
 RUN npm ci --no-audit --no-fund \
  && npm run build:offline \
  && rm -rf /opt/src/.git \
- && find /opt/src -type f ! -path '*/node_modules/*' ! -path '*/dist/*' -print0 \
-    | sort -z | xargs -0 cat | sha256sum | cut -d' ' -f1 > /opt/pristine-hash \
  && tar -cf /opt/pi-source.tar --exclude=node_modules --exclude='packages/*/dist' \
-        --exclude='packages/*/*/dist' -C /opt src
+        --exclude='packages/*/*/dist' -C /opt src \
+ && tar -tf /opt/pi-source.tar | sed 's|^src/||' | grep -v '/$' | grep -v '^$' \
+        > /opt/source-manifest.txt \
+ && mkdir /tmp/pristine && tar -xf /opt/pi-source.tar --strip-components=1 -C /tmp/pristine \
+ && (cd /tmp/pristine && { find . -type f ! -path './node_modules/*' -print0 | sort -z \
+     | tee /tmp/.pl | xargs -0 cat; cat /tmp/.pl; } \
+     | sha256sum | cut -d' ' -f1) > /opt/pristine-hash \
+ && rm -rf /tmp/pristine /tmp/.pl
 COPY .proteus-boot.sh /usr/local/bin/pi-boot
 RUN chmod +x /usr/local/bin/pi-boot
 WORKDIR /workspace

@@ -30,4 +30,4 @@ the cache-hit path, where runtime-read files (`config/`) must still be synced.
 
 Attribution: deepseek-harness (github.com/deepseek-ai/deepseek-harness), MIT.
 
-Known issue: the boot wrapper syncs `/workspace/src/.` over the baked tree without excluding a `node_modules/` the agent may have installed into its own source, which can shadow the baked dependencies. Until the wrapper excludes it (needs an image rebake), instruct agents not to install dependencies into `src/`.
+Boot semantics (exact tree): tracked files deleted or renamed by the agent are removed from the baked tree before the overlay (the image carries the `git archive` manifest); the source hash covers paths as well as contents, so renames and empty files always re-key the build; the overlay excludes an agent-installed `node_modules`; and a rebuild first removes every build output and `.tsbuildinfo`, so artifacts are derived from the current source and a deleted entry point cannot boot from a stale bundle. An untouched copy boots via the pristine fast path with no copying at all.

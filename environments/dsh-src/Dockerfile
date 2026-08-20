@@ -13,10 +13,12 @@ RUN corepack enable && pnpm install --frozen-lockfile
 RUN npm run build:lib
 RUN git archive --format=tar -o /opt/dsh-source.tar HEAD \
  && rm -rf /opt/src/.git \
+ && tar -tf /opt/dsh-source.tar | grep -v '/$' > /opt/source-manifest.txt \
  && mkdir /tmp/pristine && tar -xf /opt/dsh-source.tar -C /tmp/pristine \
- && (cd /tmp/pristine && find . -type f ! -path './node_modules/*' -print0 \
-     | sort -z | xargs -0 cat | sha256sum | cut -d' ' -f1) > /opt/pristine-hash \
- && rm -rf /tmp/pristine
+ && (cd /tmp/pristine && { find . -type f ! -path './node_modules/*' -print0 | sort -z \
+     | tee /tmp/.pl | xargs -0 cat; cat /tmp/.pl; } \
+     | sha256sum | cut -d' ' -f1) > /opt/pristine-hash \
+ && rm -rf /tmp/pristine /tmp/.pl
 COPY .proteus-boot.sh /usr/local/bin/dsh-boot
 RUN chmod +x /usr/local/bin/dsh-boot
 ENV DSH_HOME=/state

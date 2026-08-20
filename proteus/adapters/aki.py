@@ -57,6 +57,7 @@ class AkiHarness:
     """`HarnessAdapter` for the Aki research harness."""
 
     name = "aki"
+    disposition_in_files = False   # the apparatus installs its own carrier
 
     SURFACES = (
         Surface("memory", "memory", unit="file", write_tools=frozenset({"memory_write"})),

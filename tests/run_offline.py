@@ -4,6 +4,8 @@ import sys
 import tempfile
 import traceback
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
 
 def main() -> int:
     import tests.test_aki_adapter as A

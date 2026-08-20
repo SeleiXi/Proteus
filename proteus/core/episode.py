@@ -173,13 +173,39 @@ def run(cfg: RunConfig, start: int = 0) -> RunResult:
             seed_task(harness, cfg.task)
         snapshot.init(harness)
 
+    # Resume must restore the experiment's state, not just its files: the selection
+    # baseline, the visible feedback, and the cumulative counters all live in
+    # eval_history, and a resume that reset them would let accept_reject approve a
+    # post-resume episode worse than everything before the interruption.
     eval_history: list[dict] = []
     prior_feedback = ""
+    totals: dict = {}
+    best_score: float | None = None
+    history_path = cfg.root / "eval_history.json"
+    if start and history_path.exists():
+        try:
+            eval_history = json.loads(history_path.read_text())[:start]
+        except (json.JSONDecodeError, OSError):
+            eval_history = []
+        for row in eval_history:
+            results = row.get("results") or []
+            if results:
+                score = sum(r.get("score", 0.0) for r in results) / len(results)
+                if row.get("accepted") and (best_score is None or score >= best_score):
+                    best_score = score
+            for key, value in (row.get("counters") or {}).items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    totals[key] = totals.get(key, 0) + value
+        if eval_history:
+            last = eval_history[-1]
+            from proteus.core.goal import EvalResult
+            by_name = {r["name"]: EvalResult(**r) for r in (last.get("results") or [])}
+            prior_feedback = cfg.goal.observe_feedback(by_name)
+            if prior_feedback and not last.get("accepted", True):
+                prior_feedback += "\n(Your last episode's changes were not kept.)"
     error = ""
     done = start
-    totals: dict = {}
     last_accepted = snapshot.head(harness)   # episode-0 state, or the resume point
-    best_score: float | None = None
     for ep in range(start + 1, cfg.episodes + 1):
         spec = EpisodeSpec(
             root=cfg.root, episode=ep, model=cfg.model,
@@ -233,7 +259,8 @@ def run(cfg: RunConfig, start: int = 0) -> RunResult:
                 totals[key] = totals.get(key, 0) + value
 
         eval_history.append({"episode": ep, "accepted": accepted,
-                             "results": [r.__dict__ for r in results]})
+                             "results": [r.__dict__ for r in results],
+                             "counters": dict(res.counters or {})})
         prior_feedback = cfg.goal.observe_feedback(by_name)  # OBSERVE-visible only
         if prior_feedback and not accepted:
             prior_feedback += "\n(Your last episode's changes were not kept.)"
@@ -241,6 +268,6 @@ def run(cfg: RunConfig, start: int = 0) -> RunResult:
         if cfg.progress_path is not None:
             _append_progress(cfg, ep, res, trace, accepted, results)
 
-    (cfg.root / "eval_history.json").write_text(json.dumps(eval_history, indent=1))
+    history_path.write_text(json.dumps(eval_history, indent=1))
     return RunResult(name=cfg.name, episodes_complete=done, root=str(cfg.root),
                      error=error, eval_history=eval_history, counters=totals)

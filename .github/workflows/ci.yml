@@ -27,3 +27,5 @@ jobs:
         run: ruff check .
       - name: tests
         run: pytest tests/ -q
+      - name: offline runner (the no-pytest path must stay alive)
+        run: python tests/run_offline.py

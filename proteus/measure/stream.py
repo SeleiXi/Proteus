@@ -131,6 +131,10 @@ def between_within(streams: dict[str, list[list[str]]], level: str = "freq",
         r = mb / max(mw, 1e-9)
         return r, mw, mb
 
+    if len(streams) < 2:
+        raise ValueError(
+            "between_within needs at least two labels: with one label there are no "
+            "between-label pairs and R is undefined")
     if all(len(ss) < 2 for ss in streams.values()):
         raise ValueError(
             "between_within needs at least one label with 2+ streams: with a single stream "

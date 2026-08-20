@@ -99,8 +99,10 @@ def units(harness_root: Path, surfaces: Sequence[Surface]) -> dict[str, dict[str
             # two-file skill could be edited without the measurement changing at all.
             groups: dict[str, list[Path]] = {}
             for path in _files(base):
-                parent = path.parent
-                key = "." if parent == base else parent.relative_to(base).as_posix()
+                rel = path.relative_to(base)
+                # the unit is the TOP-LEVEL directory: alpha/scripts/run.py belongs to
+                # unit "alpha", not to a separate unit "alpha/scripts"
+                key = rel.parts[0] if len(rel.parts) > 1 else "."
                 groups.setdefault(key, []).append(path)
             for key, members in groups.items():
                 out[s.name][key] = _sha("\0".join(

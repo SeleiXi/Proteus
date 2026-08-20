@@ -16,6 +16,7 @@ dependencies = []
 [project.optional-dependencies]
 llm = []  # the llm harness uses stdlib urllib; no SDK needed
 sandbox = []          # Docker is invoked via the CLI, no Python SDK required
+dsh = ["zstandard>=0.21; python_version < '3.14'"]  # dsh session logs are zstd
 dev = ["pytest>=7.0", "ruff==0.14.14"]
 
 [project.scripts]

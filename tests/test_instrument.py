@@ -55,15 +55,19 @@ def test_rejection_removes_ignored_files_too(tmp_path):
 
 def test_directory_units_see_every_member(tmp_path):
     h = tmp_path / "h"
-    (h / "skills" / "alpha").mkdir(parents=True)
+    (h / "skills" / "alpha" / "scripts").mkdir(parents=True)
     (h / "skills" / "alpha" / "SKILL.md").write_text("how to alpha\n")
     (h / "skills" / "alpha" / "run.py").write_text("A = 1\n")
+    (h / "skills" / "alpha" / "scripts" / "helper.py").write_text("B = 1\n")
     surfaces = [Surface("skills", "skills", unit="directory")]
     before = distance.units(h, surfaces)
+    assert set(before["skills"]) == {"alpha"}, \
+        "a nested subdirectory must belong to its top-level unit, not become one"
     (h / "skills" / "alpha" / "SKILL.md").write_text("how to alpha, revised\n")
-    after = distance.units(h, surfaces)
-    assert set(before["skills"]) == {"alpha"}
-    assert before != after, "editing one file of a two-file skill was invisible"
+    mid = distance.units(h, surfaces)
+    assert mid != before, "editing one file of a multi-file skill was invisible"
+    (h / "skills" / "alpha" / "scripts" / "helper.py").write_text("B = 2\n")
+    assert distance.units(h, surfaces) != mid, "a nested member's edit was invisible"
     assert distance.compare(h, h, surfaces)["skills"].distance == 0.0
 
 
@@ -301,3 +305,82 @@ def test_audit_is_quiet_on_a_clean_run(tmp_path):
     (h / "notes" / "plan.md").write_text("Next episode: tidy the notes index.\n")
     a = audit.audit_run(tmp_path / "run", [])
     assert a.clean and not a.escaped and not a.aware
+
+
+# ---------------------------------------------------- review round 2 regressions
+
+def test_resume_restores_the_selection_baseline(tmp_path):
+    # interrupted after a 1.0-scoring accepted episode, a resumed accept_reject run must
+    # reject a 0.0 episode — a reset baseline would accept it
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core import EvaluatorSpec, GoalConfig, NEUTRAL
+    from proteus.core.episode import RunConfig, run
+    from proteus.core.goal import EvalResult
+
+    def scorer(trace, ctx):
+        return EvalResult(name="score", score=1.0 if ctx.episode == 1 else 0.0)
+
+    goal = GoalConfig.of(evaluators=(EvaluatorSpec(name="score", run=scorer),),
+                         selection="accept_reject")
+    def cfg(episodes):
+        return RunConfig(name="t", adapter=MinimalHarness(), disposition=NEUTRAL,
+                         goal=goal, root=tmp_path / "r", model="mock",
+                         episodes=episodes, seed=1)
+    first = run(cfg(1))
+    assert first.eval_history[0]["accepted"]
+    resumed = run(cfg(2), start=1)
+    assert len(resumed.eval_history) == 2, "resume dropped the pre-interruption history"
+    assert resumed.eval_history[0]["episode"] == 1
+    assert not resumed.eval_history[1]["accepted"], \
+        "a 0.0 episode was accepted after resume: the selection baseline was reset"
+
+
+def test_single_label_between_within_is_refused():
+    from proteus.measure import stream
+    try:
+        stream.between_within({"only": [["a", "b"], ["a", "b"]]}, permutations=10)
+    except ValueError as exc:
+        assert "two labels" in str(exc)
+    else:
+        raise AssertionError("one label has no between-label pairs; R must be refused")
+
+
+def test_overwrite_discards_stale_records(tmp_path):
+    import json
+    from proteus.sweep import run_sweep
+    root = tmp_path / "out"
+    run_sweep(_sweep_cfg(root))
+    run_sweep(_sweep_cfg(root, on_existing="overwrite"))
+    rows = [json.loads(line) for line in (root / "seeds.jsonl").read_text().splitlines()]
+    assert len(rows) == 1, f"overwrite left stale seed rows: {len(rows)}"
+    prog = list((root / "progress").glob("*.jsonl"))
+    lines = [line for f in prog for line in f.read_text().splitlines() if line.strip()]
+    assert len(lines) == 1, "overwrite left stale progress lines"
+
+
+def test_task_workspace_lives_outside_the_snapshot(tmp_path):
+    import subprocess
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.bench import as_goal, task_root
+    from proteus.bench.local import local_task
+    from proteus.core import NEUTRAL
+    from proteus.core.episode import RunConfig, run
+
+    task = local_task("local:interval-merge")
+    root = tmp_path / "r"
+    cfg = RunConfig(name="t", adapter=MinimalHarness(), disposition=NEUTRAL,
+                    goal=as_goal(task), root=root, model="mock", episodes=1, seed=1,
+                    task=task)
+    res = run(cfg)
+    assert res.episodes_complete == 1
+    assert task_root(root / "harness") == root / "task"
+    assert (root / "task" / "solution.py").exists(), "task seeded outside the harness"
+    assert not (root / "harness" / "task").exists()
+    listed = subprocess.run(
+        ["git", "--git-dir", str(root / ".snapshot.git"), "ls-tree", "-r",
+         "--name-only", "HEAD"],
+        capture_output=True, text=True, check=True).stdout
+    assert "task/" not in listed, "the task workspace leaked into the snapshot"
+    # and the evaluator still finds and grades it
+    scored = res.eval_history[0]["results"]
+    assert scored and scored[0]["name"].startswith("local:")

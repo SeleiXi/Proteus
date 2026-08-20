@@ -3,14 +3,18 @@
 A goal-conditioned run needs two workspaces that must not be confused:
 
 * the **harness** (`<run>/harness/`) — what evolves and what we measure; it persists
-  across episodes and is the dependent variable;
-* the **task workspace** (`<run>/harness/task/`) — the thing the agent is asked to work
-  on this episode.
+  across episodes, is snapshotted per episode, and is the dependent variable;
+* the **task workspace** (`<run>/task/`) — the thing the agent is asked to work on.
 
-Putting the task *inside* the harness workspace is deliberate: every adapter already gives
-the agent file access to its own workspace, so a benchmark plugs in with no adapter change
-at all. The cost is that task files count as harness structure unless the measurement layer
-excludes them, which `TASK_SUBDIR` exists to make explicit.
+The task lives OUTSIDE the harness, beside it in the run root. It used to live inside,
+and that was wrong twice over: a benchmark that clones a git repository (SWE-bench) put
+a nested `.git` inside the snapshot, which git records as a gitlink — the task's working
+files were invisible to snapshots and untouched by rejection rollbacks, so a "restored"
+harness silently kept its evolved task state. Outside the snapshot, the contract is
+explicit instead of accidental: **the task workspace is the exercise, not the subject —
+it moves only forward, and selection rolls back the harness, never the task.**
+Containerized adapters bind it into the agent's view at `/workspace/task`; the
+measurement layer never reads it.
 
 A `BenchTask` is three things: text the agent is given as its goal, a setup that seeds the
 task workspace, and a grader that reads the workspace afterwards. Everything else — when
@@ -28,12 +32,16 @@ from typing import Callable, Sequence
 from proteus.core.adapter import ActionEvent
 from proteus.core.goal import EvalResult, Goal, GoalConfig, GoalContext, Visibility
 
-#: Where a task is seeded, relative to the harness root.
+#: Where a task is seeded, relative to the RUN root (the harness's parent).
 TASK_SUBDIR = "task"
 
 
 def task_root(harness_root: str | Path) -> Path:
-    return Path(harness_root) / TASK_SUBDIR
+    """The task workspace for a run, derived from the harness root every evaluator gets.
+
+    `<run>/task/`, a sibling of `<run>/harness/` — outside the snapshot on purpose (see
+    the module docstring)."""
+    return Path(harness_root).parent / TASK_SUBDIR
 
 
 @dataclass(frozen=True)
@@ -65,13 +73,21 @@ def workspace_diff(ws: Path, base: str = "") -> str:
 
 
 def as_evaluator(task: BenchTask):
-    """Wrap a task's grader in the framework's evaluator signature."""
+    """Wrap a task's grader in the framework's evaluator signature.
+
+    Graders that accept an `episode` keyword get the current episode number — a grader
+    with per-run caching (SWE-bench's official harness keys on run_id) must fold the
+    episode into its cache identity or every episode returns episode 1's verdict."""
+    import inspect
+    takes_episode = "episode" in inspect.signature(task.grade).parameters
 
     def evaluate(trace: Sequence[ActionEvent], ctx: GoalContext) -> EvalResult:
         ws = task_root(ctx.harness_root)
         if not ws.exists():
             return EvalResult(name=task.id, score=0.0, passed=False,
                               detail="task workspace missing (was setup run?)")
+        if takes_episode:
+            return task.grade(ws, episode=ctx.episode)
         return task.grade(ws)
 
     return evaluate

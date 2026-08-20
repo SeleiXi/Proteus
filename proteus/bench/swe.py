@@ -56,11 +56,15 @@ def _setup(ws: Path, inst: dict[str, Any]) -> None:
                    check=True)
 
 
-def _grade(ws: Path, inst: dict[str, Any], episode_tag: str) -> EvalResult:
+def _grade(ws: Path, inst: dict[str, Any], episode: int = 0) -> EvalResult:
     name = f"swebench:{inst['instance_id']}"
     diff = workspace_diff(ws, inst["base_commit"])
     if not diff.strip():
         return EvalResult(name=name, score=0.0, passed=False, detail="empty patch")
+    # the official harness caches on (run_id, instance_id); the run id must therefore be
+    # unique per (episode, patch), or every later episode returns a stale verdict
+    import hashlib
+    run_id = f"proteus-ep{episode}-{hashlib.sha1(diff.encode()).hexdigest()[:10]}"
 
     try:
         import docker
@@ -83,7 +87,7 @@ def _grade(ws: Path, inst: dict[str, Any], episode_tag: str) -> EvalResult:
                 "model_patch": diff}
         result = run_instance(
             test_spec=spec, pred=pred, client=docker.from_env(),
-            run_id=f"proteus-{episode_tag}",   # never reuse: see module doc
+            run_id=run_id,
             timeout=GRADE_TIMEOUT_S)
     except TypeError as exc:
         return EvalResult(name=name, score=0.0, passed=False,
@@ -107,17 +111,18 @@ def _grade(ws: Path, inst: dict[str, Any], episode_tag: str) -> EvalResult:
 
 
 def swe_task(instance_id: str, *, dataset: str = DEFAULT_DATASET,
-             split: str = "test", episode_tag: str = "ep") -> BenchTask:
+             split: str = "test") -> BenchTask:
     """One SWE-bench instance as a `BenchTask`.
 
-    `episode_tag` must differ per episode — pass e.g. `f"ep{episode}"` — or the official
-    harness returns the previous episode's cached verdict.
+    The grader is episode-aware (`as_evaluator` passes the current episode) and folds a
+    patch digest into the official harness's cache identity, so no episode can be served
+    another episode's cached verdict.
     """
     inst = _load_instance(instance_id, dataset, split)
     return BenchTask(
         id=f"swebench:{instance_id}",
         goal_text=inst["problem_statement"],
         setup=lambda ws: _setup(ws, inst),
-        grade=lambda ws: _grade(ws, inst, episode_tag),
+        grade=lambda ws, episode=0: _grade(ws, inst, episode),
         base_commit=inst["base_commit"],
     )

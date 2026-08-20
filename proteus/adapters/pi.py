@@ -120,6 +120,13 @@ class PiHarness:
             raise RuntimeError(
                 f"could not extract pi source from {self.image}: {proc.stderr[-300:]}")
 
+    @staticmethod
+    def _task_mount(run_root: Path) -> tuple:
+        """Bind the run's task workspace (a snapshot-external sibling of the harness)
+        into the agent's view, when the run is goal-conditioned."""
+        task = run_root / "task"
+        return ((str(task), "/workspace/task"),) if task.is_dir() else ()
+
     def check_boot(self, harness_root: Path) -> str:
         """Viability gate: sync + rebuild + `--version` through the image's boot wrapper.
 
@@ -195,7 +202,8 @@ class PiHarness:
                      "-p", spec.phase_prompts.get(phase, phase)],
                     env={"DEEPSEEK_API_KEY": self.key},
                     timeout_s=self.phase_timeout_s,
-                    mounts=((str(harness), "/workspace"), (str(state), "/state")),
+                    mounts=((str(harness), "/workspace"), (str(state), "/state"))
+                           + self._task_mount(run_root),
                     stop_check=stop_check if budget else None,
                 )
             except subprocess.TimeoutExpired:

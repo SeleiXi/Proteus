@@ -78,6 +78,11 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
     if cfg.on_existing not in ("refuse", "resume", "overwrite"):
         raise ValueError(f"on_existing must be refuse/resume/overwrite, got {cfg.on_existing!r}")
     cfg.root.mkdir(parents=True, exist_ok=True)
+    if cfg.on_existing == "overwrite":
+        # discarding the run roots while appending to their records would leave two
+        # seed rows and two episode-1 progress lines per run — records go with the runs
+        (cfg.root / "seeds.jsonl").unlink(missing_ok=True)
+        shutil.rmtree(cfg.root / "progress", ignore_errors=True)
     done = completed_seeds(cfg.root, cfg.episodes) if cfg.on_existing == "resume" else set()
 
     # manifest first: the live report discovers every planned run from it, so tracking
