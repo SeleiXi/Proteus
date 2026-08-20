@@ -11,6 +11,8 @@
 # cached on /state keyed by the hash. The overlay excludes an agent-installed
 # node_modules so it cannot shadow the baked dependencies.
 set -e
+# the container may run as an arbitrary host uid: give npm a writable HOME
+export HOME=/tmp
 SRC=/opt/src
 CLI=$SRC/apps/cli/lib/bin.js
 DISTS=$(cd "$SRC" && find apps packages vendor -type d -name lib -not -path '*/node_modules/*' 2>/dev/null | tr '
@@ -36,9 +38,14 @@ if [ -d /workspace/src/apps ]; then
                 [ -e "/workspace/src/$p" ] || rm -f "$SRC/$p"
             done < /opt/source-manifest.txt
         fi
-        (cd /workspace/src && tar -cf - --exclude='./node_modules' .) | tar -xf - -C "$SRC"
+        # files-only archive: a directory ENTRY makes tar chmod/utime that directory
+        # on extraction, which a non-root uid cannot do to the baked root-owned tree.
+        # File entries create missing parents quietly and touch nothing that exists.
+        (cd /workspace/src && find . -type f ! -path './node_modules/*' -print0 \
+            | tar -cf - --null -T -) \
+            | tar -xf - -m --no-same-permissions -C "$SRC"
         if [ -f "/state/dist-$HASH.tar" ]; then
-            tar -xf "/state/dist-$HASH.tar" -C "$SRC"
+            tar -xf "/state/dist-$HASH.tar" -m --no-same-permissions -C "$SRC"
         else
             # build outputs must be derived from THIS source and nothing else: a stale
             # artifact of a deleted entry point would boot even though the snapshot says
@@ -54,7 +61,8 @@ if [ -d /workspace/src/apps ]; then
                 exit 97
             fi
             mkdir -p /state
-            (cd "$SRC" && tar -cf "/state/dist-$HASH.tar" $DISTS)
+            (cd "$SRC" && find $DISTS -type f -print0 \
+                | tar -cf "/state/dist-$HASH.tar" --null -T -)
         fi
     fi
 fi

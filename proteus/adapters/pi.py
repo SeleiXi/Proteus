@@ -85,9 +85,14 @@ class PiHarness:
         # per-instance key injection first (multi-tenant runs must not share env)
         self.key = key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY", "")
         from proteus.sandbox import DockerSandbox, SandboxConfig
+        # containers write into bind mounts; on Linux a root-in-container write leaves
+        # root-owned files the host user can neither snapshot-clean nor edit, so the
+        # container runs as the host user (the images chmod their /opt/src for this)
+        host_user = f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else ""
         # a caller may pass its own environment (see DshHarness.__init__)
         self.sandbox = sandbox or DockerSandbox(SandboxConfig(
             network=network, image=image, env_passthrough=("DEEPSEEK_API_KEY",),
+            user=host_user,
         ))
 
     def surfaces(self) -> Sequence[Surface]:
@@ -111,8 +116,10 @@ class PiHarness:
         if dest.exists() and any(dest.iterdir()):
             return                        # resumed root: the seed owns its source already
         dest.mkdir(parents=True, exist_ok=True)
+        user = (["--user", f"{os.getuid()}:{os.getgid()}"]
+                if hasattr(os, "getuid") else [])
         proc = subprocess.run(
-            ["docker", "run", "--rm", "--network", "none",
+            ["docker", "run", "--rm", "--network", "none", *user,
              "-v", f"{dest}:/proteus-out", "--entrypoint", "sh", self.image,
              "-c", f"tar -xf {SOURCE_TAR} -C /proteus-out --strip-components=1"],
             capture_output=True, text=True, errors="replace", check=False)

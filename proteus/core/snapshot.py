@@ -15,10 +15,17 @@ from pathlib import Path
 
 def _git(work_tree: Path, *args: str) -> str:
     git_dir = work_tree.parent / ".snapshot.git"
-    return subprocess.run(
+    proc = subprocess.run(
         ["git", "--git-dir", str(git_dir), "--work-tree", str(work_tree), *args],
-        capture_output=True, text=True, check=True,
-    ).stdout
+        capture_output=True, text=True, errors="replace", check=False,
+    )
+    if proc.returncode != 0:
+        # check=True swallows stderr into an opaque exit-128 traceback; the reason is
+        # the whole diagnostic (permissions, dubious ownership, an unreadable file)
+        raise RuntimeError(
+            f"git {args[0]} failed ({proc.returncode}) in {work_tree}: "
+            f"{proc.stderr.strip()[-300:]}")
+    return proc.stdout
 
 
 def init(work_tree: Path) -> bool:
@@ -52,11 +59,7 @@ def commit(work_tree: Path, message: str) -> str:
     """
     # `-f`: include files any ignore rule would exclude (see `init`)
     _git(work_tree, "add", "-A", "-f", "--", ".")
-    subprocess.run(
-        ["git", "--git-dir", str(work_tree.parent / ".snapshot.git"),
-         "--work-tree", str(work_tree), "commit", "-q", "--allow-empty", "-m", message],
-        check=True,
-    )
+    _git(work_tree, "commit", "-q", "--allow-empty", "-m", message)
     return head(work_tree)
 
 

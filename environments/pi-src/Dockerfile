@@ -21,5 +21,9 @@ RUN npm ci --no-audit --no-fund \
  && rm -rf /tmp/pristine /tmp/.pl
 COPY .proteus-boot.sh /usr/local/bin/pi-boot
 RUN chmod +x /usr/local/bin/pi-boot
+# the boot wrapper syncs and rebuilds inside /opt/src as whatever uid the host runs
+# the container with — the tree must be writable by any user
+RUN chmod -R a+rwX /opt/src && chmod a+r /opt/pristine-hash /opt/source-manifest.txt \
+ && chmod a+r /opt/*.tar
 WORKDIR /workspace
 ENTRYPOINT ["pi-boot"]

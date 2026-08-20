@@ -23,5 +23,9 @@ COPY .proteus-boot.sh /usr/local/bin/dsh-boot
 RUN chmod +x /usr/local/bin/dsh-boot
 ENV DSH_HOME=/state
 ENV DSH_TELEMETRY_MODE=DISABLED
+# the boot wrapper syncs and rebuilds inside /opt/src as whatever uid the host runs
+# the container with — the tree must be writable by any user
+RUN chmod -R a+rwX /opt/src && chmod a+r /opt/pristine-hash /opt/source-manifest.txt \
+ && chmod a+r /opt/*.tar
 WORKDIR /workspace
 ENTRYPOINT ["dsh-boot"]
