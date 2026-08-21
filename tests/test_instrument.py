@@ -205,6 +205,33 @@ def test_incomplete_episode_preserves_candidate_ref_and_restores_checkpoint(tmp_
     assert preserved == "keep for analysis\n"
 
 
+def test_retried_incomplete_episode_keeps_each_failed_candidate(tmp_path):
+    harness = tmp_path / "retry" / "harness"
+    harness.mkdir(parents=True)
+    (harness / "state.txt").write_text("valid")
+    snapshot.init(harness)
+    checkpoint = snapshot.head(harness)
+
+    (harness / "state.txt").write_text("first failure")
+    first = snapshot.preserve_failed_candidate(harness, checkpoint, 1, "first")
+    (harness / "state.txt").write_text("second failure")
+    second = snapshot.preserve_failed_candidate(harness, checkpoint, 1, "second")
+
+    git_dir = harness.parent / ".snapshot.git"
+    refs = []
+    for ref in (
+        "refs/proteus/candidates/episode-1-failed",
+        "refs/proteus/candidates/episode-1-failed-attempt-2",
+    ):
+        refs.append(subprocess.run(
+            ["git", "--git-dir", str(git_dir), "rev-parse", ref],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip())
+    assert refs == [first, second]
+    assert (harness / "state.txt").read_text() == "valid"
+    assert snapshot.head(harness) == checkpoint
+
+
 # ------------------------------------------------------------------- unit identity
 
 def test_directory_units_see_every_member(tmp_path):

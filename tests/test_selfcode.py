@@ -202,6 +202,8 @@ def test_staged_episode_mounts_frozen_active_read_only_and_candidate_writable(tm
         assert len(phase_calls) == 4
         assert not [call for call in sandbox.calls if call["command"] == ["--version"]], \
             "a staged episode must not preflight the writable candidate before its phases"
+        assert (active / "candidate").is_dir()
+        assert (active / ".proteus").is_dir()
         for call in phase_calls:
             mounts = call["mounts"]
             assert (str(active), "/workspace", "ro") in mounts
