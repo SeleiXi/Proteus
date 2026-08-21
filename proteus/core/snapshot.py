@@ -144,13 +144,23 @@ def preserve_failed_candidate(work_tree: Path, restore_sha: str, episode: int,
     Unlike a scored rejection, an interrupted/infrastructure-failed episode is not a
     completed episode and must not advance the ``episode N`` mapping. Moving HEAD back
     after restoring lets resume retry the same episode, while the candidate remains
-    inspectable under ``refs/proteus/candidates/episode-N-failed``.
+    inspectable under ``refs/proteus/candidates/episode-N-failed``. Retries never
+    overwrite that first failure: later attempts use ``...-attempt-2``,
+    ``...-attempt-3``, and so on.
     """
     candidate = ""
     try:
         candidate = commit(work_tree, message)
-        _git(work_tree, "update-ref",
-             f"refs/proteus/candidates/episode-{episode}-failed", candidate)
+        base = f"refs/proteus/candidates/episode-{episode}-failed"
+        existing = set(_git(
+            work_tree, "for-each-ref", "--format=%(refname)", f"{base}*"
+        ).splitlines())
+        ref = base
+        attempt = 2
+        while ref in existing:
+            ref = f"{base}-attempt-{attempt}"
+            attempt += 1
+        _git(work_tree, "update-ref", ref, candidate)
     finally:
         reset_to_checkpoint(work_tree, restore_sha)
     return candidate

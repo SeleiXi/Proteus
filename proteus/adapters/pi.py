@@ -240,6 +240,14 @@ class PiHarness:
         # Keep the legacy preflight only for direct adapter use without an active_root.
         if spec.active_root is None and (harness / "src").is_dir():
             error = self.check_boot(harness)
+        if spec.active_root is not None:
+            # Nested bind targets must exist before Docker mounts /workspace read-only.
+            # These placeholders belong to the disposable active copy and are obscured by
+            # the writable candidate/framework mounts in the running container.
+            (active / "candidate").mkdir(exist_ok=True)
+            (active / ".proteus").mkdir(exist_ok=True)
+            if (run_root / "task").is_dir():
+                (active / "task").mkdir(exist_ok=True)
         workspace_mounts = ((str(active), "/workspace", "ro"),
                             (str(harness), "/workspace/candidate")) \
             if spec.active_root is not None else ((str(harness), "/workspace"),)

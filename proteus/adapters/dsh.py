@@ -333,6 +333,16 @@ class DshHarness:
         # Keep the legacy preflight only for direct adapter use without an active_root.
         if spec.active_root is None and (harness / "src").is_dir():
             error = self.check_boot(harness)
+        if spec.active_root is not None:
+            # Docker cannot create a nested bind target after its parent has been mounted
+            # read-only.  Materialised snapshots intentionally contain only harness files,
+            # so reserve the framework-owned mount points before /workspace becomes ro.
+            # The directories live only in the disposable active copy and are hidden by
+            # the candidate/handoff mounts inside the container.
+            (active / "candidate").mkdir(exist_ok=True)
+            (active / ".proteus").mkdir(exist_ok=True)
+            if (run_root / "task").is_dir():
+                (active / "task").mkdir(exist_ok=True)
         workspace_mounts = ((str(active), "/workspace", "ro"),
                             (str(harness), "/workspace/candidate")) \
             if spec.active_root is not None else ((str(harness), "/workspace"),)
