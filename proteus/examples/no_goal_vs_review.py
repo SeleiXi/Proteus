@@ -1,6 +1,6 @@
 """No-goal self-evolution under three action preferences, measured with one ruler.
 
-    python examples/no_goal_vs_review.py
+    python -m proteus.examples.no_goal_vs_review
 
 Runs the offline `minimal` harness under neutral / review-notes / review-tools with no goal,
 then prints the structural (what got built) and behavioural (R) measurements. This is the

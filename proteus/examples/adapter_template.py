@@ -4,7 +4,7 @@ Copy this file to `proteus/adapters/<yourname>.py` (or scaffold it with
 `python -m proteus.scaffold adapter <YourName>`), then work through the TODOs. When it
 passes
 
-    proteus check --harness examples.adapter_template:TemplateHarness --episode
+    proteus check --harness proteus.examples.adapter_template:TemplateHarness --episode
 
 your harness satisfies the whole `HarnessAdapter` contract and Proteus can evolve,
 measure, and swap dispositions in and out of it. Register a short name for it in

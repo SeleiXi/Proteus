@@ -4,9 +4,10 @@
     python -m proteus.scaffold benchmark my_task           # -> proteus/bench/my_task.py
     python -m proteus.scaffold adapter MyHarness --dest path/to/file.py
 
-The single source of truth for each skeleton is `examples/adapter_template.py` /
-`examples/benchmark_template.py` — this command copies one and renames the sentinel
-identifiers so `proteus check` (adapter) or the grader (benchmark) works immediately.
+The single source of truth for each skeleton is `proteus/examples/adapter_template.py` /
+`proteus/examples/benchmark_template.py` — this command copies one and renames the
+sentinel identifiers so `proteus check` (adapter) or the grader (benchmark) works
+immediately.
 The templates ship in both the wheel and source distribution. In a Git checkout the
 default destination is the matching `proteus/adapters/` or `proteus/bench/` directory;
 after a regular PyPI install it is the current directory, unless `--dest` is supplied.
@@ -21,9 +22,15 @@ from pathlib import Path
 
 
 def _repo_root() -> Path:
-    # proteus/ and the shipped examples/ package are siblings in both a source checkout
-    # and an unpacked wheel installation.
+    # proteus/ is a direct child of the repo root in a source checkout; in an installed
+    # wheel this is site-packages, which only the default-destination logic cares about.
     return Path(__file__).resolve().parent.parent
+
+
+def _templates_dir() -> Path:
+    # Templates live inside the package, so the same path works from a Git checkout and
+    # from an installed wheel/sdist — and the wheel's top level stays proteus-only.
+    return Path(__file__).resolve().parent / "examples"
 
 
 def _source_checkout() -> bool:
@@ -45,10 +52,10 @@ def scaffold_adapter(name: str, dest: Path, *, force: bool = False) -> Path:
     cls = name if name.endswith("Harness") else f"{name}Harness"
     short = re.sub(r"Harness$", "", cls)
     short = re.sub(r"(?<!^)(?=[A-Z])", "_", short).lower()  # CamelCase -> snake_case
-    template = _repo_root() / "examples" / "adapter_template.py"
+    template = _templates_dir() / "adapter_template.py"
     subs = {
         "TemplateHarness": cls,
-        "examples.adapter_template": _dest_module(dest),
+        "proteus.examples.adapter_template": _dest_module(dest),
         'name = "template"': f'name = "{short}"',
     }
     return _render(template, dest, subs, force=force)
@@ -57,9 +64,9 @@ def scaffold_adapter(name: str, dest: Path, *, force: bool = False) -> Path:
 def scaffold_benchmark(name: str, dest: Path, *, force: bool = False) -> Path:
     """Write a new benchmark (`BenchTask`) skeleton identified by `name` to `dest`."""
     ident = re.sub(r"[^0-9a-zA-Z_-]", "-", name)
-    template = _repo_root() / "examples" / "benchmark_template.py"
+    template = _templates_dir() / "benchmark_template.py"
     subs = {
-        "examples.benchmark_template": _dest_module(dest),
+        "proteus.examples.benchmark_template": _dest_module(dest),
         '"template-add"': f'"{ident}"',
         "name=\"template-add\"": f'name="{ident}"',
     }
@@ -69,7 +76,7 @@ def scaffold_benchmark(name: str, dest: Path, *, force: bool = False) -> Path:
 def _render(template: Path, dest: Path, subs: dict[str, str], *, force: bool) -> Path:
     if not template.exists():
         raise SystemExit(f"template not found: {template}\n"
-                         "reinstall proteus-evolve; wheels and sdists include examples/.")
+                         "reinstall proteus-evolve; distributions include proteus/examples/.")
     if dest.exists() and not force:
         raise SystemExit(f"{dest} already exists (use --force to overwrite)")
     text = template.read_text(encoding="utf-8")
@@ -85,12 +92,14 @@ def main(argv: list[str] | None = None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="kind", required=True)
 
-    a = sub.add_parser("adapter", help="new HarnessAdapter from examples/adapter_template.py")
+    a = sub.add_parser("adapter",
+                       help="new HarnessAdapter from proteus/examples/adapter_template.py")
     a.add_argument("name", help="class name, e.g. MyHarness (the 'Harness' suffix is optional)")
     a.add_argument("--dest", default="", help="output path (default: proteus/adapters/<name>.py)")
     a.add_argument("--force", action="store_true", help="overwrite an existing file")
 
-    b = sub.add_parser("benchmark", help="new BenchTask from examples/benchmark_template.py")
+    b = sub.add_parser("benchmark",
+                       help="new BenchTask from proteus/examples/benchmark_template.py")
     b.add_argument("name", help="benchmark id, e.g. my_task")
     b.add_argument("--dest", default="", help="output path (default: proteus/bench/<name>.py)")
     b.add_argument("--force", action="store_true", help="overwrite an existing file")

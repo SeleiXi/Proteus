@@ -3,8 +3,8 @@
 Every built-in adapter that runs without Docker or a model is checked here against the
 whole `HarnessAdapter` contract (`proteus.testing.check_adapter`), so a change that
 breaks the contract fails CI. The committed templates and the scaffolder are checked the
-same way, so `examples/adapter_template.py` and `python -m proteus.scaffold` can never
-silently rot.
+same way, so `proteus/examples/adapter_template.py` and `python -m proteus.scaffold` can
+never silently rot.
 
 Contributors: this is the suite to point at your own adapter. Either register it in
 `proteus/cli.py::_adapter_factory` and add its name to `PURE_ADAPTERS` (if it runs
@@ -22,16 +22,11 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import os
-import sys
 from pathlib import Path
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))  # make the un-installed examples/ importable
-
-from proteus.testing import check_adapter  # noqa: E402
+from proteus.testing import check_adapter
 
 
 def _load(name: str):
@@ -42,11 +37,11 @@ def _load(name: str):
 
 # Adapters that provision offline (no Docker, no model): the always-on CI gate. Names
 # resolve through the same factory `proteus check --harness` uses.
-PURE_ADAPTERS = ["minimal", "llm", "examples.adapter_template:TemplateHarness"]
+PURE_ADAPTERS = ["minimal", "llm", "proteus.examples.adapter_template:TemplateHarness"]
 
 # Of those, the ones whose loop also runs a full episode offline (so `--episode` works
 # with no API key). `llm` needs a model, so it is provisioning-only above.
-OFFLINE_EPISODE_ADAPTERS = ["minimal", "examples.adapter_template:TemplateHarness"]
+OFFLINE_EPISODE_ADAPTERS = ["minimal", "proteus.examples.adapter_template:TemplateHarness"]
 
 
 @pytest.mark.parametrize("name", PURE_ADAPTERS)
@@ -64,7 +59,7 @@ def test_offline_episode_conformance(name):
 # --- benchmark contract -----------------------------------------------------------------
 
 def _bench_template():
-    return importlib.import_module("examples.benchmark_template")
+    return importlib.import_module("proteus.examples.benchmark_template")
 
 
 def test_benchmark_template_grades():

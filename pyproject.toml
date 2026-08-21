@@ -42,7 +42,7 @@ dev = ["pytest>=7.0", "ruff==0.14.14"]
 proteus = "proteus.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["proteus*", "examples*"]
+include = ["proteus*"]
 namespaces = false  # do not crawl large run artefacts as implicit namespace packages
 
 [tool.setuptools.dynamic]
