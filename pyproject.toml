@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "proteus-evolve"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A harness-agnostic driver for measuring agent self-evolution: plug in any harness × model, evolve it under goal or no-goal conditions, and measure how the harness changes."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -42,8 +42,11 @@ dev = ["pytest>=7.0", "ruff==0.14.14"]
 proteus = "proteus.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["proteus*"]
+include = ["proteus*", "examples*"]
 namespaces = false  # do not crawl large run artefacts as implicit namespace packages
+
+[tool.setuptools.dynamic]
+version = {attr = "proteus.__version__"}
 
 [tool.ruff]
 line-length = 100

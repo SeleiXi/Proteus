@@ -57,10 +57,21 @@ def _adapter_factory(name: str):
         # your own adapter, no registration needed: --harness mypkg.mymodule:MyHarness
         import importlib
         mod_name, _, cls_name = name.partition(":")
+        # A generated adapter is commonly an uninstalled module in the current project.
+        # Python adds that directory for ``python -m ...`` but not for a console-script
+        # entry point such as ``proteus``.  Put it first just for this import so the
+        # scaffolder's printed next command also works from a regular wheel install.
+        cwd = str(Path.cwd())
+        sys.path.insert(0, cwd)
         try:
             cls = getattr(importlib.import_module(mod_name), cls_name)
         except (ImportError, AttributeError) as exc:
             raise SystemExit(f"cannot load harness {name!r}: {exc}") from exc
+        finally:
+            try:
+                sys.path.remove(cwd)
+            except ValueError:  # pragma: no cover - defensive against import hooks
+                pass
         return cls
     raise SystemExit(f"unknown harness {name!r} "
                      "(built-in: minimal, llm, dsh, pi, aki; or use <module>:<Class>)")
@@ -189,6 +200,8 @@ def _evaluator(spec: str, adapter_factory):
 
 
 def cmd_run(args) -> int:
+    import hashlib
+
     if args.max_turns < 0:
         raise SystemExit("--max-turns must be 0 (unlimited) or a positive integer")
     if args.min_turns_per_phase < 0:
@@ -218,13 +231,22 @@ def cmd_run(args) -> int:
         episodes=args.episodes,
         max_turns=args.max_turns,
         task=(tasks[0] if tasks else None),
+        condition_metadata={
+            # A contains:<path>:<needle> evaluator may embed sensitive literal text.
+            # The normal manifest rows already expose its public identity; digests keep
+            # resume sensitive to every raw CLI parameter without publishing the needle.
+            "evaluator_specs": [
+                hashlib.sha256(spec.encode()).hexdigest()
+                for spec in (args.evaluator or ())
+            ],
+        },
         min_turns_per_phase=args.min_turns_per_phase,
         announce_budget=args.announce_budget,
         on_existing=args.on_existing,
     )
     try:
         records = run_sweep(cfg)
-    except FileExistsError as exc:
+    except (FileExistsError, ValueError) as exc:
         raise SystemExit(str(exc)) from None
     done = sum(r["episodes_complete"] for r in records)
     print(f"ran {len(records)} seeds, {done} episodes -> {args.out}")

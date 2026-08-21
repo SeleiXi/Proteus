@@ -122,8 +122,13 @@ git -C dsh-evolution log --oneline
 ```
 
 The resume invocation must use the same experimental configuration as the original run.
-Resume restores the evolved files, selection baseline, visible feedback, and cumulative
-counters; it does not reseed the harness.
+Proteus v0.2 records that condition in `manifest.json` and rejects model, goal, evaluator,
+arm, task, budget, adapter/environment, or continuity changes **before modifying any run
+record**. Resume restores the evolved files, selection baseline, visible feedback,
+cumulative counters, and framework handoff; it does not reseed the harness. This includes
+a crash before episode 1: the episode-0 checkpoint is restored rather than treated as a
+fresh run. A v0.1 sweep cannot be condition-verified and must be finished with v0.1 or
+restarted under a new `--out` (see the v0.2.0 release notes).
 
 ## A benchmark as the goal
 

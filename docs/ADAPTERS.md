@@ -216,11 +216,13 @@ isolation runs during.
 ## Resuming an interrupted seed
 
 Episodes cost minutes to tens of minutes, so a seed that dies at episode 26 is hours of
-trajectory. `run(cfg, start=N)` continues from the episode after `N`, using the harness on
-disk rather than re-seeding over it, and `proteus run --on-existing resume` does this for a
-whole sweep: finished seeds are skipped, partial ones pick up at the episode after their
-last snapshot. `completed_episodes()` counts contiguous snapshot commits, not trace files —
-a provider outage writes a trace per failed attempt, and counting those reports a seed that
+trajectory. `run(cfg, start=N, resume=True)` continues from the episode after `N`, using
+the harness on disk rather than re-seeding over it; a positive `start` implies resume, while
+the explicit flag distinguishes episode-0 recovery from a new run. `proteus run
+--on-existing resume` applies this to a whole sweep only after the versioned manifest
+condition matches: finished seeds are skipped, partial ones pick up after their last
+snapshot. `completed_episodes()` counts contiguous snapshot commits, not trace files — a
+provider outage writes a trace per failed attempt, and counting those reports a seed that
 finished nothing as complete.
 
 ## Letting the harness edit its own code

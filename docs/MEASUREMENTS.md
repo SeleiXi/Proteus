@@ -23,7 +23,7 @@ For a sweep rooted at `runs/demo/`:
 
 ```text
 runs/demo/
-├── manifest.json                  # planned arms, seeds, goal, evaluator metadata
+├── manifest.json                  # plan + immutable, versioned experimental condition
 ├── seeds.jsonl                    # one completion record per run attempt
 ├── progress/<run-id>.jsonl        # live per-episode units, scores, counters
 └── runs/

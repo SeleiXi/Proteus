@@ -13,7 +13,7 @@
   <a href="https://github.com/proteus-evolve/Proteus/actions/workflows/release-smoke.yml"><img src="https://github.com/proteus-evolve/Proteus/actions/workflows/release-smoke.yml/badge.svg" alt="release smoke"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/version-0.1.0-informational.svg" alt="v0.1.0">
+  <img src="https://img.shields.io/badge/version-0.2.0-informational.svg" alt="v0.2.0">
   <img src="https://img.shields.io/badge/status-research%20preview-orange.svg" alt="research preview">
 </p>
 
@@ -26,6 +26,7 @@
   <a href="docs/RECIPES.md">Recipes</a> •
   <a href="docs/BENCHMARKS.md">Bring a Benchmark</a> •
   <a href="docs/MEASUREMENTS.md">Add a Measurement</a> •
+  <a href="docs/releases/v0.2.0.md">v0.2.0 Notes</a> •
   <a href="environments/README.md">Environments</a> •
   <a href="#-measurement">Measurement</a>
 </p>
@@ -219,7 +220,8 @@ round-trip, snapshot-ability, trace shape). The full guide: [docs/ADAPTERS.md](d
 To start from a working skeleton instead of a blank file,
 `python -m proteus.scaffold adapter MyHarness` copies the fully-commented
 [examples/adapter_template.py](examples/adapter_template.py) — see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md). The templates ship on PyPI too; outside a Git checkout
+the default output is the current directory (or choose an explicit `--dest`).
 
 ## 📦 Prepared environments
 
@@ -270,7 +272,7 @@ roots, so the evolving agent can never read its own condition.
 
 ## 📊 Status
 
-`v0.1` (research preview). Working today: the offline `minimal` harness; the live `llm`
+`v0.2.0` (research preview). Working today: the offline `minimal` harness; the live `llm`
 harness; pinned, source-evolving DeepSeek Harness and Pi adapters with frozen per-episode
 activation, automatic rollback, exact-tree boundary gates, rebuild caching, turn budgets,
 and task mounts; the Aki research adapter;

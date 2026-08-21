@@ -15,7 +15,7 @@ Trust model (v1):
 - Run ids are unguessable (uuid4); knowing the id grants read access to that run's
   progress — the sharable-link model.
 
-**Deployment posture (v0.1): localhost / trusted network only.** This server is not
+**Deployment posture (v0.2.0): localhost / trusted network only.** This server is not
 hardened for untrusted public exposure — there is no key redaction in logs, no auth on
 cancellation, and a request can name an arbitrary LLM `base_url`. Bind it to 127.0.0.1
 (the default) or put it behind an authenticating proxy; do not expose it raw to the

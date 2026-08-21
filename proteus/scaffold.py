@@ -7,9 +7,9 @@
 The single source of truth for each skeleton is `examples/adapter_template.py` /
 `examples/benchmark_template.py` — this command copies one and renames the sentinel
 identifiers so `proteus check` (adapter) or the grader (benchmark) works immediately.
-Scaffolding is a source-checkout activity: the templates live under `examples/`, which is
-not shipped in the wheel, so run this from a clone (an editable `pip install -e .` is
-fine).
+The templates ship in both the wheel and source distribution. In a Git checkout the
+default destination is the matching `proteus/adapters/` or `proteus/bench/` directory;
+after a regular PyPI install it is the current directory, unless `--dest` is supplied.
 """
 
 from __future__ import annotations
@@ -21,8 +21,14 @@ from pathlib import Path
 
 
 def _repo_root() -> Path:
-    # proteus/ is a direct child of the repo root in a source checkout / editable install.
+    # proteus/ and the shipped examples/ package are siblings in both a source checkout
+    # and an unpacked wheel installation.
     return Path(__file__).resolve().parent.parent
+
+
+def _source_checkout() -> bool:
+    root = _repo_root()
+    return (root / "pyproject.toml").is_file() and (root / ".git").exists()
 
 
 def _dest_module(dest: Path) -> str:
@@ -63,7 +69,7 @@ def scaffold_benchmark(name: str, dest: Path, *, force: bool = False) -> Path:
 def _render(template: Path, dest: Path, subs: dict[str, str], *, force: bool) -> Path:
     if not template.exists():
         raise SystemExit(f"template not found: {template}\n"
-                         "run scaffold from a source checkout (see `pip install -e .`).")
+                         "reinstall proteus-evolve; wheels and sdists include examples/.")
     if dest.exists() and not force:
         raise SystemExit(f"{dest} already exists (use --force to overwrite)")
     text = template.read_text(encoding="utf-8")
@@ -94,14 +100,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.kind == "adapter":
         short = re.sub(r"Harness$", "", args.name)
         short = re.sub(r"(?<!^)(?=[A-Z])", "_", short).lower()
-        dest = Path(args.dest) if args.dest else _repo_root() / "proteus" / "adapters" / f"{short}.py"
+        default = (_repo_root() / "proteus" / "adapters" / f"{short}.py"
+                   if _source_checkout() else Path.cwd() / f"{short}.py")
+        dest = Path(args.dest) if args.dest else default
         out = scaffold_adapter(args.name, dest, force=args.force)
         mod = _dest_module(out)
         cls = args.name if args.name.endswith("Harness") else args.name + "Harness"
         print(f"scaffolded {out}")
         print(f"next: implement the TODOs, then  proteus check --harness {mod}:{cls} --episode")
     else:
-        dest = Path(args.dest) if args.dest else _repo_root() / "proteus" / "bench" / f"{args.name}.py"
+        default = (_repo_root() / "proteus" / "bench" / f"{args.name}.py"
+                   if _source_checkout() else Path.cwd() / f"{args.name}.py")
+        dest = Path(args.dest) if args.dest else default
         out = scaffold_benchmark(args.name, dest, force=args.force)
         print(f"scaffolded {out}")
         print("next: implement setup()/grade(), then wire TASK into a run via as_goal(TASK)")

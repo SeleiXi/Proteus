@@ -23,7 +23,9 @@ reserve the name before that upload.
 ## Release checklist
 
 1. Confirm `main` is clean, pushed, and green in `.github/workflows/ci.yml`.
-2. Set `project.version` in `pyproject.toml`; update user-facing version/install text.
+2. Set the single version source, `proteus.__version__`, in `proteus/__init__.py`; update
+   the README badge, install text, and `docs/releases/v<version>.md`. `pyproject.toml`
+   reads this value dynamically, and CI verifies installed metadata matches it.
 3. Build locally and validate both distributions:
 
    ```bash
@@ -31,18 +33,22 @@ reserve the name before that upload.
    python -m twine check dist/*
    ```
 
-4. Push the annotated release tag. The tag automatically starts `release-smoke`:
+4. Smoke-test both installed distributions outside the checkout. This is also enforced in
+   CI and the publishing workflow: the scaffolder must generate a working adapter from the
+   wheel and a working benchmark from the sdist.
+5. Push the annotated release tag. The tag automatically starts `release-smoke`:
 
    ```bash
-   git tag -a v0.1.0 -m "Proteus v0.1.0"
-   git push origin v0.1.0
+   VERSION=0.2.0
+   git tag -a "v$VERSION" -m "Proteus v$VERSION"
+   git push origin "v$VERSION"
    ```
 
-5. Do not create the GitHub Release until every `release-smoke` job for that tag passes.
-6. Publish the GitHub Release from the same tag. `.github/workflows/publish.yml` verifies
-   that the tag matches `project.version`, builds an sdist and wheel in a non-publishing
+6. Do not create the GitHub Release until every `release-smoke` job for that tag passes.
+7. Publish the GitHub Release from the same tag. `.github/workflows/publish.yml` verifies
+   that the tag matches `proteus.__version__`, builds an sdist and wheel in a non-publishing
    job, then uploads them through the protected `pypi` environment using OIDC.
-7. Verify `pip install proteus-evolve==<version>` in a fresh environment and check the
+8. Verify `pip install proteus-evolve==<version>` in a fresh environment and check the
    PyPI provenance/attestation before announcing the release.
 
 PyPI files and versions cannot be replaced. If upload verification fails after a version

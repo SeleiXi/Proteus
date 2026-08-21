@@ -260,6 +260,24 @@ def test_cli_run_returns_failure_when_an_episode_fails(tmp_path):
     assert rc == 1
 
 
+def test_cli_manifest_does_not_publish_contains_evaluator_needle(tmp_path):
+    import json
+
+    from proteus import cli
+
+    root = tmp_path / "private-evaluator"
+    rc = cli.main([
+        "run", "--harness", "minimal", "--arm", "neutral", "--seeds", "1",
+        "--episodes", "1", "--evaluator", "contains:AGENTS.md:private-needle",
+        "--out", str(root),
+    ])
+    assert rc == 0
+    manifest_text = (root / "manifest.json").read_text()
+    assert "private-needle" not in manifest_text
+    metadata = json.loads(manifest_text)["condition"]["metadata"]
+    assert len(metadata["evaluator_specs"][0]) == 64
+
+
 def test_cli_rejects_invalid_turn_reservations_without_traceback(tmp_path):
     from proteus import cli
 
