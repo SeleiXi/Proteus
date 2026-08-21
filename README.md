@@ -103,11 +103,14 @@ An installed action preference measurably shifts what the harness grows — and 
 | yours | `--harness <module>:<Class>` — no registration | your adapter |
 
 `dsh` and `pi` are the source-evolving third-party integrations. At seed time each adapter
-extracts the pinned harness's real TypeScript source into `harness/src/`; every later phase
-boots that copy, rebuilding it when its content changes. The source is therefore a measured,
-snapshotted `loop` surface alongside instructions, notes, tools, and skills. The adapters
-still leave the upstream repositories untouched: they arrange the run copy, launch one
-prepared container per phase, and parse the harness's own session logs.
+extracts the pinned harness's real TypeScript source into `harness/src/`. During episode N,
+all four phases boot the same read-only last-valid snapshot while writing a separate
+candidate. After reflect, Proteus rebuilds and validates the candidate; only a passing
+candidate activates in episode N+1. A failed build is preserved for analysis and
+automatically rolled back, so the next episode remains healthy. The source is therefore a
+measured, snapshotted `loop` surface alongside instructions, notes, tools, and skills. The
+adapters still leave the upstream repositories untouched: they arrange the run copy,
+launch one prepared container per phase, and parse the harness's own session logs.
 
 ## 🏗️ How it works
 
@@ -123,8 +126,9 @@ flowchart LR
     S --> F
 ```
 
-Every seed runs `N` context-fresh **episodes**; only files cross the episode boundary. One
-episode is four phases:
+Every seed runs `N` context-fresh **episodes**. Evolved harness files cross the episode
+boundary; adapters that opt into framework continuity also receive a bounded operational
+handoff stored outside the measured snapshot. One episode is four phases:
 
 ```
 observe  →  propose  →  act  →  reflect
@@ -133,7 +137,8 @@ observe  →  propose  →  act  →  reflect
 - **observe** — take stock; if you configured a *visible* evaluator, its score on the last
   episode is shown here.
 - **propose** — list ways to improve your own harness.
-- **act** — carry one out by editing the harness (the goal, if any, is announced here).
+- **act** — carry one out by editing the harness. The goal, if any, is announced in every
+  fresh phase so observation and planning stay aligned with it.
 - **reflect** — decide what to keep.
 
 The **framework** owns everything that is not the harness (prompts, goal text, evaluator
@@ -144,7 +149,7 @@ routing, snapshotting, selection, measurement). The **adapter** owns everything 
 
 | Concept | What it is |
 |---|---|
-| `HarnessAdapter` | the contract a harness implements: its surfaces, how to run an episode, how to read the action trace, how to install/remove a disposition |
+| `HarnessAdapter` | the contract a harness implements: its surfaces, phase-continuity capability, how to run an episode, how to read the action trace, how to install/remove a disposition |
 | `Surface` | one editable, persistent region (memory / skills / tools / code / …), declared as data so the measurement layer needs no hard-coded names |
 | `Disposition` | the action-preference perturbation — a **single, removable** change at t=0 (prompt suffix, config value, or code patch) |
 | `GoalConfig` | goal / no-goal / multi-goal, each evaluator `HIDDEN` or `OBSERVE`-visible, plus outer-loop selection (`accept_reject`) |
@@ -262,8 +267,9 @@ roots, so the evolving agent can never read its own condition.
 ## 📊 Status
 
 `v0.1` (research preview). Working today: the offline `minimal` harness; the live `llm`
-harness; pinned, source-evolving DeepSeek Harness and Pi adapters with exact-tree boot,
-rebuild caching, viability gates, turn budgets, and task mounts; the Aki research adapter;
+harness; pinned, source-evolving DeepSeek Harness and Pi adapters with frozen per-episode
+activation, automatic rollback, exact-tree boundary gates, rebuild caching, turn budgets,
+and task mounts; the Aki research adapter;
 local, Polyglot, and SWE-bench task integrations; resume-safe sweeps; the full measurement,
 audit, reliability, report, and repository-export paths; and adapter/environment tooling.
 CI covers Python 3.10–3.14. The separate release-smoke workflow runs two episodes across

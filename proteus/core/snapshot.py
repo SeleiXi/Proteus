@@ -9,6 +9,8 @@ reads `W_t` back under `F0`.
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -40,6 +42,11 @@ def init(work_tree: Path) -> bool:
     subprocess.run(["git", "init", "--bare", "-q", str(git_dir)], check=True)
     _git(work_tree, "config", "user.email", "proteus@localhost")
     _git(work_tree, "config", "user.name", "proteus")
+    # A first commit of a large source-evolving harness can trigger detached `git gc
+    # --auto`. The process then races temporary-run cleanup (and can recreate `gc.log`
+    # after rmtree has visited the bare repo). Snapshots are short, append-only research
+    # histories; maintenance should be explicit rather than an invisible background job.
+    _git(work_tree, "config", "gc.auto", "0")
     # No ignore rules apply to a harness snapshot. The harness is the measured object, so
     # nothing in it may be invisible: not files matched by the user's global gitignore
     # (`*.jsonl` is a common one, and traces are jsonl), and not files matched by a
@@ -57,6 +64,13 @@ def commit(work_tree: Path, message: str) -> str:
     every episode maps to exactly one commit — the checkpoint mapping crystallization and
     path-length rely on must have no gaps.
     """
+    nested = _nested_git_metadata(work_tree)
+    if nested:
+        names = ", ".join(str(path.relative_to(work_tree)) for path in nested[:5])
+        raise RuntimeError(
+            "snapshot refused nested git metadata; nested repositories become gitlinks "
+            f"and cannot be restored faithfully: {names}"
+        )
     # `-f`: include files any ignore rule would exclude (see `init`)
     _git(work_tree, "add", "-A", "-f", "--", ".")
     _git(work_tree, "commit", "-q", "--allow-empty", "-m", message)
@@ -66,8 +80,29 @@ def commit(work_tree: Path, message: str) -> str:
 def head(work_tree: Path) -> str:
     try:
         return _git(work_tree, "rev-parse", "HEAD").strip()
-    except subprocess.CalledProcessError:
+    except RuntimeError:
         return ""
+
+
+def _nested_git_metadata(work_tree: Path) -> list[Path]:
+    """Every nested `.git` file/dir, without descending into repository internals."""
+    found: list[Path] = []
+    for root, dirs, files in os.walk(work_tree):
+        if ".git" in dirs:
+            path = Path(root) / ".git"
+            found.append(path)
+            dirs.remove(".git")
+        if ".git" in files:
+            found.append(Path(root) / ".git")
+    return sorted(found)
+
+
+def _strip_nested_git_metadata(work_tree: Path) -> None:
+    for path in _nested_git_metadata(work_tree):
+        if path.is_symlink() or path.is_file():
+            path.unlink(missing_ok=True)
+        elif path.is_dir():
+            shutil.rmtree(path)
 
 
 def commit_for_episode(work_tree: Path, episode: int) -> str | None:
@@ -95,8 +130,41 @@ def restore(work_tree: Path, sha: str) -> None:
     after `sha`). The `x` matters: without it a rejected episode's ignored files survive
     the restore, and the next episode wakes up with state selection was supposed to undo.
     """
+    # Nested repositories are never valid snapshot state. Removing their metadata first
+    # turns them into ordinary paths so restore + clean can actually remove their files.
+    _strip_nested_git_metadata(work_tree)
     _git(work_tree, "restore", "--source", sha, "--staged", "--worktree", "--", ".")
     _git(work_tree, "clean", "-fdx")
+
+
+def preserve_failed_candidate(work_tree: Path, restore_sha: str, episode: int,
+                              message: str) -> str:
+    """Keep a failed attempt under a dedicated ref, then restore the valid checkpoint.
+
+    Unlike a scored rejection, an interrupted/infrastructure-failed episode is not a
+    completed episode and must not advance the ``episode N`` mapping. Moving HEAD back
+    after restoring lets resume retry the same episode, while the candidate remains
+    inspectable under ``refs/proteus/candidates/episode-N-failed``.
+    """
+    candidate = ""
+    try:
+        candidate = commit(work_tree, message)
+        _git(work_tree, "update-ref",
+             f"refs/proteus/candidates/episode-{episode}-failed", candidate)
+    finally:
+        reset_to_checkpoint(work_tree, restore_sha)
+    return candidate
+
+
+def reset_to_checkpoint(work_tree: Path, sha: str) -> None:
+    """Restore files, index, and HEAD to a known-valid checkpoint.
+
+    This is the recovery primitive for incomplete episodes. Scored rejections deliberately
+    keep their candidate in the main ancestry, but an infrastructure or snapshot failure
+    must leave the run exactly resumable from the prior valid episode.
+    """
+    restore(work_tree, sha)
+    _git(work_tree, "update-ref", "HEAD", sha)
 
 
 def materialize(work_tree: Path, sha: str, dest: Path) -> None:

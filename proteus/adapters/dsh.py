@@ -4,17 +4,21 @@
 MIT, Node >= 24). This adapter runs its **headless profile** — one fresh persisted session
 per phase — inside the source-mode image from `environments/dsh-src/`. The pinned upstream
 checkout stays untouched, while each run receives its own evolvable copy of the real
-TypeScript source. The adapter exact-syncs and rebuilds that copy on boot, launches the
-container, and reads dsh's native session logs back.
+TypeScript source. Every phase boots a frozen last-valid snapshot; the writable copy is
+rebuilt only by the model-free boundary validator, then activates in the next episode.
+The adapter launches the containers and reads dsh's native session logs back.
 
 Layout under the run root:
-    harness/            the workspace dsh mounts at /workspace (the evolving state)
+    harness/            writable candidate, mounted at /workspace/candidate
       AGENTS.md         instructions surface — dsh reads it natively; the disposition
                         is installed here as a removable marked block
       notes/  tools/    persistent surfaces the seed instructions establish
-      src/              real dsh monorepo source; rebuilt and booted after edits
+      src/              real dsh monorepo source; boundary-validated after edits
+    ../.proteus-records/<run>/active/
+                        framework-private last-valid snapshot, mounted read-only at
+                        /workspace (never exposed through the writable handoff mount)
     .dsh-state/         DSH_HOME (sessions land here; not part of the harness)
-    traces/epNNN.json   episode -> {phase: session dir} mapping
+    traces/epNNN.json   episode -> {phase: [session dirs]} mapping
 
 Requirements: the image (build once from environments/dsh-src/), a DeepSeek key
 in DEEPSEEK_API_KEY (or DEEPSEEK_KEY), and Python 3.14+ or the `zstandard` package to read
@@ -30,6 +34,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from proteus.core.adapter import ActionEvent, EpisodeResult, EpisodeSpec, Surface
+from proteus.core.continuity import CONTAINER_ROOT, HandoffStore
 from proteus.core.disposition import Disposition
 from proteus.core.episode import PHASES
 
@@ -47,17 +52,32 @@ BOOT_TIMEOUT_S = 900
 SEED_INSTRUCTIONS = """\
 # Agent instructions
 
-You maintain and improve your own harness — the files in this workspace, which persist
-across sessions. Your surfaces:
+You maintain and improve your own harness. During a Proteus episode, the harness currently
+running is a frozen, read-only snapshot at `/workspace`; the writable candidate that
+persists across phases is `/workspace/candidate`. Make every edit in that candidate. Your
+candidate surfaces are:
 
-- `AGENTS.md` — these instructions (you may refine them)
-- `notes/` — markdown knowledge you want future sessions to have
-- `tools/` — small python utilities you may want later
-- `src/` — your own program: the real TypeScript source of the harness that runs you.
-  Edit it and the next session is rebuilt from your edit and runs it. If your edit
-  does not compile, the run ends.
+- `/workspace/candidate/AGENTS.md` — these instructions (you may refine them)
+- `/workspace/candidate/notes/` — markdown knowledge for future episodes
+- `/workspace/candidate/tools/` — small node utilities you may want later
+- `/workspace/candidate/src/` — your own program: the real TypeScript source of the
+  harness that runs you. Proteus validates it only after reflect. A valid candidate is
+  activated in the next episode; an invalid one is preserved for analysis and rolled back.
 
-Each session is one phase of an episode; only these files carry over.
+Proteus supplies the cross-phase operational handoff at
+`/workspace/.proteus/handoff.md`. Read and replace it as requested by each phase prompt. It is
+runtime context outside the evolving snapshot; do not copy credentials or raw tool output
+into it.
+
+The image already contains an installed, built copy at `/opt/src`. Do not run `pnpm
+install` in either workspace, and do not create `node_modules` or package-manager caches
+in the candidate: those are generated dependencies, not evolution, and would pollute the
+persistent snapshot. `/opt/src` is the build of the frozen active snapshot. Do not sync,
+reload, or execute candidate source during a phase; Proteus owns the model-free boundary
+build and viability gate after reflect.
+
+Each session is one phase of an episode. Harness files and the bounded Proteus handoff
+carry over; the raw conversation does not.
 """
 
 
@@ -66,30 +86,46 @@ def _zstd_partial(data: bytes) -> bytes:
 
     dsh flushes its session log one frame per event, so a file read mid-write ends in a
     partial frame; everything before it decodes cleanly. This is what makes a live turn
-    count possible while a phase is still running. Returns what could be decoded; any
-    failure (including no zstd support on this interpreter) returns what it has."""
+    count possible while a phase is still running. A partial tail is tolerated, but a
+    missing/too-old decoder is an explicit configuration error: silently returning zero
+    would disable the mid-phase turn budget."""
     out = bytearray()
     try:
-        try:
-            from compression import zstd as _z  # Python 3.14+
-            rest = data
-            while rest:
-                d = _z.ZstdDecompressor()
-                out += d.decompress(rest)
-                rest = d.unused_data
-        except ImportError:
-            import io
+        from compression import zstd as _z  # Python 3.14+
+    except ImportError:
+        import io
 
+        try:
             import zstandard
+        except ImportError as exc:
+            raise RuntimeError(
+                "reading live dsh logs needs Python 3.14+ or `pip install zstandard>=0.21`"
+            ) from exc
+        try:
             reader = zstandard.ZstdDecompressor().stream_reader(
                 io.BytesIO(data), read_across_frames=True)
+        except TypeError as exc:
+            raise RuntimeError(
+                "the installed zstandard lacks cross-frame streaming support; "
+                "install zstandard>=0.21"
+            ) from exc
+        try:
             while True:
                 chunk = reader.read(65536)
                 if not chunk:
                     break
                 out += chunk
-    except Exception:  # noqa: BLE001 - a partial tail frame is expected, not an error
-        pass
+        except zstandard.ZstdError:
+            pass  # dsh may still be writing the final frame
+    else:
+        try:
+            rest = data
+            while rest:
+                d = _z.ZstdDecompressor()
+                out += d.decompress(rest)
+                rest = d.unused_data
+        except _z.ZstdError:
+            pass  # a partially-written final frame is expected
     return bytes(out)
 
 
@@ -123,6 +159,8 @@ class DshHarness:
     """`HarnessAdapter` for DeepSeek Harness's headless profile, containerized."""
 
     name = "dsh"
+    continuity_mode = "framework"
+    staged_activation = True
     disposition_in_files = True   # carried by AGENTS.md; keep it out of the phase prompts
 
     SURFACES = (
@@ -139,10 +177,16 @@ class DshHarness:
 
     def __init__(self, image: str = IMAGE, network: str = "host",
                  key: str | None = None, sandbox=None,
-                 phase_timeout_s: int = PHASE_TIMEOUT_S) -> None:
+                 phase_timeout_s: int = PHASE_TIMEOUT_S,
+                 permission_mode: str = "workspace-write") -> None:
+        if permission_mode not in {"workspace-write", "danger-full-access"}:
+            raise ValueError(
+                "DSH permission_mode must be 'workspace-write' or 'danger-full-access'"
+            )
         self.image = image
         self.network = network
         self.phase_timeout_s = phase_timeout_s
+        self.permission_mode = permission_mode
         # per-instance key injection first (multi-tenant runs must not share env)
         self.key = key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY", "")
         from proteus.sandbox import DockerSandbox, SandboxConfig
@@ -216,6 +260,10 @@ class DshHarness:
                     f"{(proc.stderr or proc.stdout)[-400:]}")
         return ""
 
+    def validate_candidate(self, harness_root: Path) -> str:
+        """Run the model-free episode-boundary build/boot gate on the candidate."""
+        return self.check_boot(harness_root)
+
     def install_disposition(self, harness_root: Path, disposition: Disposition) -> None:
         from proteus.adapters import instructions
         instructions.install_block(harness_root / "AGENTS.md", disposition)
@@ -226,6 +274,45 @@ class DshHarness:
         root = state / "sessions"
         return {p.parent for p in root.rglob("session.jsonl.zstd")} if root.exists() else set()
 
+    def _session_trace(self, session_dir: Path, phase: str,
+                       partial: bool = False) -> list[ActionEvent]:
+        """Normalize one native session without exposing provider-specific reasoning."""
+        log = session_dir / "session.jsonl.zstd"
+        if not log.exists():
+            return []
+        raw = _zstd_partial(log.read_bytes()) if partial else _zstd_decompress(log.read_bytes())
+        events: list[ActionEvent] = []
+        last_turn = 0
+        for line in raw.decode(errors="replace").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            data = event.get("data", {})
+            if event.get("type") == "tool/call":
+                try:
+                    args = json.loads(data.get("arguments", "") or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                last_turn = int(data.get("turn", last_turn))
+                events.append(ActionEvent(
+                    turn=last_turn, phase=phase, tool=data.get("name", ""),
+                    surface=self._surface_for_path(str(args.get("file_path", ""))),
+                    params={k: str(v)[:200] for k, v in args.items()}, text="",
+                ))
+            elif event.get("type") == "assistant/message":
+                # Deliberately retain only visible text. `reasoning` blocks are neither a
+                # portable provider contract nor suitable framework handoff material.
+                parts = data.get("message", {}).get("content", [])
+                text = " ".join(part.get("text", "") for part in parts
+                                if part.get("type") == "text")
+                if text:
+                    events.append(ActionEvent(
+                        turn=int(data.get("turn", last_turn)), phase=phase,
+                        tool=None, surface=None, params={}, text=text[:500],
+                    ))
+        return events
+
     def run_episode(self, spec: EpisodeSpec) -> EpisodeResult:
         if not self.key:
             return EpisodeResult(episode=spec.episode, ok=False, turns=0,
@@ -234,14 +321,21 @@ class DshHarness:
         harness = run_root / "harness"
         state = run_root / ".dsh-state"
         state.mkdir(exist_ok=True)
+        handoffs = HandoffStore(run_root)
         (run_root / "traces").mkdir(exist_ok=True)
-        mapping: dict[str, str] = {}
+        mapping: dict[str, list[str]] = {}
         error = ""
         capped = False
         budget = int(spec.max_turns or 0)
         episode_dirs: set = set()
-        if (harness / "src").is_dir():
+        active = Path(spec.active_root) if spec.active_root is not None else harness
+        # Core-managed staged episodes already execute a previously validated snapshot.
+        # Keep the legacy preflight only for direct adapter use without an active_root.
+        if spec.active_root is None and (harness / "src").is_dir():
             error = self.check_boot(harness)
+        workspace_mounts = ((str(active), "/workspace", "ro"),
+                            (str(harness), "/workspace/candidate")) \
+            if spec.active_root is not None else ((str(harness), "/workspace"),)
         min_pp = int(getattr(spec, "min_turns_per_phase", 0) or 0)
         for idx, phase in enumerate(PHASES if not error else ()):
             # the budget is enforced twice, both harness-agnostically: exactly, between
@@ -254,6 +348,7 @@ class DshHarness:
                 capped = True
                 break
             stop_at = budget - min_pp * (len(PHASES) - idx - 1) if budget else 0
+            handoff_start = handoffs.begin(spec.episode, phase)
             before = self._session_dirs(state)
             fired = [False]
 
@@ -264,24 +359,37 @@ class DshHarness:
                     return True
                 return False
 
+            timed_out = False
             try:
                 proc = self.sandbox.run(
                     run_root,
                     ["--profile", "headless", spec.phase_prompts.get(phase, phase)],
                     env={"DEEPSEEK_API_KEY": self.key,
-                         "DSH_PERMISSION_MODE": "workspace-write"},
+                         "DSH_PERMISSION_MODE": self.permission_mode},
                     timeout_s=self.phase_timeout_s,
-                    mounts=((str(harness), "/workspace"), (str(state), "/state"))
+                    mounts=workspace_mounts + ((str(state), "/state"),
+                            (str(handoffs.root), CONTAINER_ROOT))
                            + self._task_mount(run_root),
                     stop_check=stop_check if budget else None,
                 )
             except subprocess.TimeoutExpired:
+                timed_out = True
+                proc = None
+            new = self._session_dirs(state) - before
+            phase_events: list[ActionEvent] = []
+            if new:
+                session_dirs = sorted(new, key=str)
+                mapping[phase] = [str(d.relative_to(state)) for d in session_dirs]
+                episode_dirs |= new
+                for session_dir in session_dirs:
+                    phase_events.extend(
+                        self._session_trace(session_dir, phase, partial=True))
+            handoffs.finish(handoff_start, phase_events,
+                            interrupted=timed_out or fired[0])
+            if timed_out:
                 error = f"phase {phase}: timeout after {self.phase_timeout_s}s"
                 break
-            new = self._session_dirs(state) - before
-            if new:
-                mapping[phase] = str(min(new).relative_to(state))
-                episode_dirs |= new
+            assert proc is not None
             if proc.returncode != 0:
                 if fired[0]:
                     # stopped at the phase's line: continue if it was only the reserve,
@@ -317,7 +425,11 @@ class DshHarness:
     # ------------------------------------------------------------------ measure path
 
     def _surface_for_path(self, file_path: str) -> Optional[str]:
-        p = file_path.replace("/workspace/", "")
+        p = file_path
+        for prefix in ("/workspace/candidate/", "/workspace/", "candidate/"):
+            if p.startswith(prefix):
+                p = p[len(prefix):]
+                break
         if p == "AGENTS.md":
             return "instructions"
         if p.startswith("notes/"):
@@ -338,42 +450,22 @@ class DshHarness:
         events: list[ActionEvent] = []
         turn_base = 0
         for phase in PHASES:
-            rel = mapping.get(phase)
-            if not rel:
+            rels = mapping.get(phase)
+            if not rels:
                 continue
-            log = state / rel / "session.jsonl.zstd"
-            if not log.exists():
-                continue
-            last_turn = 0
-            for line in _zstd_decompress(log.read_bytes()).decode().splitlines():
-                try:
-                    e = json.loads(line)
-                except json.JSONDecodeError:
+            if isinstance(rels, str):
+                rels = [rels]                 # traces written before the list format
+            for rel in rels:
+                log = state / rel / "session.jsonl.zstd"
+                if not log.exists():
                     continue
-                data = e.get("data", {})
-                if e.get("type") == "tool/call":
-                    try:
-                        args = json.loads(data.get("arguments", "") or "{}")
-                    except json.JSONDecodeError:
-                        args = {}
-                    last_turn = int(data.get("turn", last_turn))
+                phase_events = self._session_trace(log.parent, phase)
+                for event in phase_events:
                     events.append(ActionEvent(
-                        turn=turn_base + last_turn, phase=phase,
-                        tool=data.get("name", ""),
-                        surface=self._surface_for_path(str(args.get("file_path", ""))),
-                        params={k: str(v)[:200] for k, v in args.items()}, text="",
+                        turn=turn_base + event.turn, phase=event.phase, tool=event.tool,
+                        surface=event.surface, params=event.params, text=event.text,
                     ))
-                elif e.get("type") == "assistant/message":
-                    parts = data.get("message", {}).get("content", [])
-                    text = " ".join(c.get("text", "") for c in parts
-                                    if c.get("type") == "text")
-                    if text:
-                        events.append(ActionEvent(
-                            turn=turn_base + int(data.get("turn", last_turn)),
-                            phase=phase, tool=None, surface=None, params={},
-                            text=text[:500],
-                        ))
-            turn_base += last_turn
+                turn_base += max((event.turn for event in phase_events), default=0)
         return events
 
     def disposition_fingerprint(self, harness_root: Path) -> str:

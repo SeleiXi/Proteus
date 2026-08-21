@@ -13,6 +13,7 @@ endpoint needs egress).
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -99,7 +100,7 @@ class SandboxConfig:
 
 class Sandbox(Protocol):
     def run(self, run_root: Path, command: list[str], env: Mapping[str, str],
-            timeout_s: int, mounts: tuple[tuple[str, str], ...] = (),
+            timeout_s: int, mounts: tuple[tuple[str, ...], ...] = (),
             stop_check: "Callable[[], bool] | None" = None,
             ) -> subprocess.CompletedProcess:
         """`stop_check`, when given, is polled while the command runs; returning True
@@ -112,7 +113,7 @@ class LocalSandbox:
     """No isolation — runs the command as a plain subprocess. For trusted harnesses only."""
 
     def run(self, run_root: Path, command: list[str], env: Mapping[str, str],
-            timeout_s: int, mounts: tuple[tuple[str, str], ...] = (),
+            timeout_s: int, mounts: tuple[tuple[str, ...], ...] = (),
             stop_check=None,   # in-process harnesses enforce budgets natively; unused here
             ) -> subprocess.CompletedProcess:
         return subprocess.run(command, capture_output=True, text=True, cwd=str(run_root),
@@ -132,7 +133,7 @@ class DockerSandbox:
         self.config = config
 
     def run(self, run_root: Path, command: list[str], env: Mapping[str, str],
-            timeout_s: int, mounts: tuple[tuple[str, str], ...] = (),
+            timeout_s: int, mounts: tuple[tuple[str, ...], ...] = (),
             stop_check=None, poll_s: float = 2.0,
             ) -> subprocess.CompletedProcess:
         """`mounts` replaces the default `<run_root>:/run` bind when given — adapters with
@@ -143,14 +144,18 @@ class DockerSandbox:
         code is returned — the caller decides whether that stop was a cap or a failure.
         """
         c = self.config
-        argv = ["docker", "run", "--rm", "--init", "--network", c.network]
-        name = ""
-        if stop_check is not None:
-            import uuid
-            name = f"proteus-{uuid.uuid4().hex[:12]}"
-            argv += ["--name", name]
-        for host, cont in (mounts or ((str(run_root), "/run"),)):
-            argv += ["-v", f"{host}:{cont}"]
+        import uuid
+
+        name = f"proteus-{uuid.uuid4().hex[:12]}"
+        argv = ["docker", "run", "--rm", "--init", "--network", c.network,
+                "--name", name]
+        docker_env = os.environ.copy()
+        for mount in (mounts or ((str(run_root), "/run"),)):
+            if len(mount) not in (2, 3):
+                raise ValueError(f"mount must be (host, container[, options]), got {mount!r}")
+            host, cont, *options = mount
+            suffix = f":{options[0]}" if options else ""
+            argv += ["-v", f"{host}:{cont}{suffix}"]
         if c.mem_limit:
             argv += ["--memory", c.mem_limit]
         if c.cpus:
@@ -163,17 +168,28 @@ class DockerSandbox:
             argv += ["-v", f"{host}:{cont}"]
         for key in c.env_passthrough:
             if key in env:
-                argv += ["-e", f"{key}={env[key]}"]
+                # Let Docker copy the value from its own environment.  Keeping the
+                # value out of argv prevents API keys from appearing in `ps` output.
+                argv += ["-e", key]
+                docker_env[key] = env[key]
         for key, value in c.env.items():
             argv += ["-e", f"{key}={value}"]
         argv += [*c.extra_args, c.image, *(c.entrypoint or ()), *command]
         if stop_check is None:
-            return subprocess.run(argv, capture_output=True, text=True, errors="replace",
-                                  timeout=timeout_s, check=False)
+            try:
+                return subprocess.run(
+                    argv, capture_output=True, text=True, errors="replace",
+                    env=docker_env, timeout=timeout_s, check=False)
+            except subprocess.TimeoutExpired:
+                # subprocess.run kills only the docker CLI process. The named container
+                # is a separate process and otherwise survives as an orphan.
+                subprocess.run(["docker", "rm", "-f", name],
+                               capture_output=True, check=False)
+                raise
 
         import time
         proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, errors="replace")
+                                text=True, errors="replace", env=docker_env)
         deadline = time.monotonic() + timeout_s
         stopped = False
         while True:
@@ -183,10 +199,29 @@ class DockerSandbox:
             except subprocess.TimeoutExpired:
                 pass
             if time.monotonic() > deadline:
-                subprocess.run(["docker", "kill", name], capture_output=True, check=False)
+                subprocess.run(["docker", "rm", "-f", name],
+                               capture_output=True, check=False)
                 out, err = proc.communicate()
                 raise subprocess.TimeoutExpired(argv, timeout_s, output=out, stderr=err)
-            if not stopped and stop_check():
-                stopped = True
-                subprocess.run(["docker", "kill", name], capture_output=True, check=False)
+            if not stopped:
+                try:
+                    should_stop = stop_check()
+                except Exception:
+                    subprocess.run(["docker", "rm", "-f", name],
+                                   capture_output=True, check=False)
+                    proc.communicate()
+                    raise
+                if should_stop:
+                    stopped = True
+                    removed = subprocess.run(
+                        ["docker", "rm", "-f", name], capture_output=True, check=False)
+                    if removed.returncode != 0 and proc.poll() is None:
+                        # `stop_check` may fire before Docker has registered the name.
+                        # Stop the client, then retry after its create attempt has ended.
+                        proc.terminate()
+                        proc.communicate()
+                        subprocess.run(["docker", "rm", "-f", name],
+                                       capture_output=True, check=False)
+                        out, err = "", ""
+                        break
         return subprocess.CompletedProcess(argv, proc.returncode, out, err)

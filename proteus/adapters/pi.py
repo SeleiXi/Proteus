@@ -7,12 +7,14 @@ the adapter contract covers real third-party harnesses of any size — the whole
 symmetric with `dsh.py` and shares its disposition carrier.
 
 Per phase, one non-interactive pi session (`-p`) runs in the source-mode image from
-`environments/pi-src/`, with the workspace at `/workspace`, session/build state at
-`/state`, and an optional benchmark workspace at `/workspace/task`. Each run evolves the
-real Pi TypeScript source under `harness/src/`; the image exact-syncs and rebuilds it before
-boot. The trace is parsed from pi's session JSONL (v3: `message` events whose content blocks
-carry `toolCall` entries). Skills are loaded explicitly with `--skill /workspace/skills`,
-so the skills surface is version-robust rather than relying on discovery conventions.
+`environments/pi-src/`, with a frozen active workspace at `/workspace`, a writable
+candidate at `/workspace/candidate`, session/build state at `/state`, and an optional
+benchmark workspace at `/workspace/task`. Each run evolves the real Pi TypeScript source
+under `harness/src/`; Proteus exact-syncs and rebuilds the candidate only at the boundary,
+then activates it in the next episode. The trace is parsed from pi's session JSONL (v3:
+`message` events whose content blocks carry `toolCall` entries). Skills are loaded
+explicitly with `--skill /workspace/skills`, so the skills surface is version-robust rather
+than relying on discovery conventions.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from typing import Optional, Sequence
 
 from proteus.adapters import instructions
 from proteus.core.adapter import ActionEvent, EpisodeResult, EpisodeSpec, Surface
+from proteus.core.continuity import CONTAINER_ROOT, HandoffStore
 from proteus.core.disposition import Disposition
 from proteus.core.episode import PHASES
 
@@ -41,18 +44,27 @@ SOURCE_TAR = "/opt/pi-source.tar"
 SEED_INSTRUCTIONS = """\
 # Agent instructions
 
-You maintain and improve your own harness — the files in this workspace, which persist
-across sessions. Your surfaces:
+You maintain and improve your own harness. During a Proteus episode, the harness currently
+running is a frozen, read-only snapshot at `/workspace`; the writable candidate that
+persists across phases is `/workspace/candidate`. Make every edit in that candidate. Your
+candidate surfaces are:
 
-- `AGENTS.md` — these instructions (you may refine them)
-- `notes/` — markdown knowledge you want future sessions to have
-- `tools/` — small python utilities you may want later
-- `skills/` — pi skill files (loaded automatically next session)
-- `src/` — your own program: the real TypeScript source of the agent that runs you.
-  Edit it and the next session is rebuilt from your edit and runs it. If your edit
-  does not compile, the run ends.
+- `/workspace/candidate/AGENTS.md` — these instructions (you may refine them)
+- `/workspace/candidate/notes/` — markdown knowledge for future episodes
+- `/workspace/candidate/tools/` — small python utilities you may want later
+- `/workspace/candidate/skills/` — pi skill files, loaded after activation
+- `/workspace/candidate/src/` — your own program: the real TypeScript source of the
+  agent that runs you. Proteus validates it only after reflect. A valid candidate is
+  activated in the next episode; an invalid one is preserved for analysis and rolled back.
 
-Each session is one phase of an episode; only these files carry over.
+Proteus supplies the cross-phase operational handoff at
+`/workspace/.proteus/handoff.md`. Read and replace it as requested by each phase prompt. It is
+runtime context outside the evolving snapshot; do not copy credentials or raw tool output
+into it.
+
+Each session is one phase of an episode. Candidate files and the bounded Proteus handoff
+carry over; the raw conversation does not. Do not reload or execute candidate code during
+the episode; Proteus owns the model-free boundary build and viability gate after reflect.
 """
 
 
@@ -60,6 +72,8 @@ class PiHarness:
     """`HarnessAdapter` for pi-coding-agent's non-interactive mode, containerized."""
 
     name = "pi"
+    continuity_mode = "framework"
+    staged_activation = True
     disposition_in_files = True   # carried by AGENTS.md; keep it out of the phase prompts
 
     SURFACES = (
@@ -68,8 +82,7 @@ class PiHarness:
         Surface("notes", "notes", unit="file", write_tools=frozenset({"write", "edit"})),
         Surface("tools", "tools", unit="file", write_tools=frozenset({"write", "edit"}),
                 is_code=True),
-        # the harness's own program, shadow-mounted over the install path at boot — see
-        # DshHarness: same arrangement, same reasons
+        # the harness's real source, exact-synced over the baked tree and rebuilt at boot
         Surface("loop", "src", unit="file", is_code=True, free_named=False,
                 write_tools=frozenset({"write", "edit"})),
     )
@@ -152,6 +165,10 @@ class PiHarness:
                     f"{(proc.stderr or proc.stdout)[-400:]}")
         return ""
 
+    def validate_candidate(self, harness_root: Path) -> str:
+        """Run the model-free episode-boundary build/boot gate on the candidate."""
+        return self.check_boot(harness_root)
+
     def install_disposition(self, harness_root: Path, disposition: Disposition) -> None:
         instructions.install_block(harness_root / "AGENTS.md", disposition)
 
@@ -164,6 +181,45 @@ class PiHarness:
     def _sessions(state: Path) -> set[Path]:
         return set(state.glob("*.jsonl"))
 
+    def _session_trace(self, path: Path, phase: str) -> list[ActionEvent]:
+        """Normalize one native Pi session for measurement and handoff fallback."""
+        events: list[ActionEvent] = []
+        turn = 0
+        if not path.exists():
+            return events
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") != "message":
+                continue
+            message = event.get("message", {})
+            if message.get("role") != "assistant":
+                continue
+            turn += 1
+            for block in message.get("content", []):
+                kind = block.get("type", "")
+                if kind in ("toolCall", "tool_call", "toolUse"):
+                    args = block.get("arguments") or block.get("input") or {}
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+                    path_arg = str(args.get("file_path") or args.get("path") or "")
+                    events.append(ActionEvent(
+                        turn=turn, phase=phase, tool=block.get("name", ""),
+                        surface=self._surface_for_path(path_arg),
+                        params={k: str(v)[:200] for k, v in args.items()}, text="",
+                    ))
+                elif kind == "text" and block.get("text"):
+                    events.append(ActionEvent(
+                        turn=turn, phase=phase, tool=None, surface=None,
+                        params={}, text=block["text"][:500],
+                    ))
+        return events
+
     def run_episode(self, spec: EpisodeSpec) -> EpisodeResult:
         if not self.key:
             return EpisodeResult(episode=spec.episode, ok=False, turns=0,
@@ -172,14 +228,21 @@ class PiHarness:
         harness = run_root / "harness"
         state = run_root / ".pi-state"
         state.mkdir(exist_ok=True)
+        handoffs = HandoffStore(run_root)
         (run_root / "traces").mkdir(exist_ok=True)
-        mapping: dict[str, str] = {}
+        mapping: dict[str, list[str]] = {}
         error = ""
         capped = False
         budget = int(spec.max_turns or 0)
         episode_files: set = set()
-        if (harness / "src").is_dir():
+        active = Path(spec.active_root) if spec.active_root is not None else harness
+        # Core-managed staged episodes already execute a previously validated snapshot.
+        # Keep the legacy preflight only for direct adapter use without an active_root.
+        if spec.active_root is None and (harness / "src").is_dir():
             error = self.check_boot(harness)
+        workspace_mounts = ((str(active), "/workspace", "ro"),
+                            (str(harness), "/workspace/candidate")) \
+            if spec.active_root is not None else ((str(harness), "/workspace"),)
         min_pp = int(getattr(spec, "min_turns_per_phase", 0) or 0)
         for idx, phase in enumerate(PHASES if not error else ()):
             # the budget is enforced twice, both harness-agnostically: exactly, between
@@ -192,6 +255,7 @@ class PiHarness:
                 capped = True
                 break
             stop_at = budget - min_pp * (len(PHASES) - idx - 1) if budget else 0
+            handoff_start = handoffs.begin(spec.episode, phase)
             before = self._sessions(state)
             fired = [False]
 
@@ -202,6 +266,7 @@ class PiHarness:
                     return True
                 return False
 
+            timed_out = False
             try:
                 proc = self.sandbox.run(
                     run_root,
@@ -210,17 +275,28 @@ class PiHarness:
                      "-p", spec.phase_prompts.get(phase, phase)],
                     env={"DEEPSEEK_API_KEY": self.key},
                     timeout_s=self.phase_timeout_s,
-                    mounts=((str(harness), "/workspace"), (str(state), "/state"))
+                    mounts=workspace_mounts + ((str(state), "/state"),
+                            (str(handoffs.root), CONTAINER_ROOT))
                            + self._task_mount(run_root),
                     stop_check=stop_check if budget else None,
                 )
             except subprocess.TimeoutExpired:
+                timed_out = True
+                proc = None
+            new = self._sessions(state) - before
+            phase_events: list[ActionEvent] = []
+            if new:
+                session_paths = sorted(new, key=str)
+                mapping[phase] = [p.name for p in session_paths]
+                episode_files |= new
+                for session_path in session_paths:
+                    phase_events.extend(self._session_trace(session_path, phase))
+            handoffs.finish(handoff_start, phase_events,
+                            interrupted=timed_out or fired[0])
+            if timed_out:
                 error = f"phase {phase}: timeout after {self.phase_timeout_s}s"
                 break
-            new = self._sessions(state) - before
-            if new:
-                mapping[phase] = min(new).name
-                episode_files |= new
+            assert proc is not None
             if proc.returncode != 0:
                 if fired[0]:
                     # stopped at the phase's line: continue if it was only the reserve,
@@ -250,7 +326,9 @@ class PiHarness:
         for f in set(episode_files) | set(extra):
             path = Path(f) if isinstance(f, Path) else state / f
             try:
-                n += path.read_text(encoding="utf-8", errors="replace").count('"toolCall"')
+                text = path.read_text(encoding="utf-8", errors="replace")
+                n += sum(text.count(f'"{marker}"')
+                         for marker in ("toolCall", "tool_call", "toolUse"))
             except OSError:
                 continue
         return n
@@ -258,7 +336,11 @@ class PiHarness:
     # ------------------------------------------------------------------ measure path
 
     def _surface_for_path(self, file_path: str) -> Optional[str]:
-        p = file_path.replace("/workspace/", "")
+        p = file_path
+        for prefix in ("/workspace/candidate/", "/workspace/", "candidate/"):
+            if p.startswith(prefix):
+                p = p[len(prefix):]
+                break
         if p == "AGENTS.md":
             return "instructions"
         for s in ("skills", "notes", "tools"):
@@ -278,40 +360,19 @@ class PiHarness:
         events: list[ActionEvent] = []
         turn = 0
         for phase in PHASES:
-            name = mapping.get(phase)
-            if not name or not (state / name).exists():
+            names = mapping.get(phase)
+            if not names:
                 continue
-            for line in (state / name).read_text(encoding="utf-8",
-                                                 errors="replace").splitlines():
-                try:
-                    e = json.loads(line)
-                except json.JSONDecodeError:
+            if isinstance(names, str):
+                names = [names]                # traces written before the list format
+            for name in names:
+                if not (state / name).exists():
                     continue
-                if e.get("type") != "message":
-                    continue
-                msg = e.get("message", {})
-                if msg.get("role") != "assistant":
-                    continue
-                turn += 1
-                for block in msg.get("content", []):
-                    btype = block.get("type", "")
-                    if btype in ("toolCall", "tool_call", "toolUse"):
-                        args = block.get("arguments") or block.get("input") or {}
-                        if isinstance(args, str):
-                            try:
-                                args = json.loads(args)
-                            except json.JSONDecodeError:
-                                args = {}
-                        path = str(args.get("file_path") or args.get("path") or "")
-                        events.append(ActionEvent(
-                            turn=turn, phase=phase,
-                            tool=block.get("name", ""),
-                            surface=self._surface_for_path(path),
-                            params={k: str(v)[:200] for k, v in args.items()}, text="",
-                        ))
-                    elif btype == "text" and block.get("text"):
-                        events.append(ActionEvent(
-                            turn=turn, phase=phase, tool=None, surface=None,
-                            params={}, text=block["text"][:500],
-                        ))
+                phase_events = self._session_trace(state / name, phase)
+                for event in phase_events:
+                    events.append(ActionEvent(
+                        turn=turn + event.turn, phase=event.phase, tool=event.tool,
+                        surface=event.surface, params=event.params, text=event.text,
+                    ))
+                turn += max((event.turn for event in phase_events), default=0)
         return events

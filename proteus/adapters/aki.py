@@ -57,7 +57,8 @@ class AkiHarness:
     """`HarnessAdapter` for the Aki research harness."""
 
     name = "aki"
-    disposition_in_files = False   # the apparatus installs its own carrier
+    continuity_mode = "native"     # Aki's supervisor owns its internal phase state
+    disposition_in_files = True    # the apparatus installs the persona through its carrier
 
     SURFACES = (
         Surface("memory", "memory", unit="file", write_tools=frozenset({"memory_write"})),
@@ -221,9 +222,7 @@ class AkiHarness:
         candidates = sorted(
             [harness_root / "loop.py",
              *(harness_root.parent / ".aki").glob("persona*"),
-             *harness_root.glob("disposition_*.py")],
-            key=str,
-        )
+             *harness_root.glob("disposition_*.py")], key=str)
         for p in candidates:
             if p.is_file():
                 h.update(p.name.encode())
