@@ -73,6 +73,10 @@ def main() -> None:
     parser.add_argument("--max-turns", type=int, default=100)
     parser.add_argument("--min-turns-per-phase", type=int, default=15,
                         help="reserved budget for each later context-fresh phase")
+    parser.add_argument(
+        "--phase-timeout", type=int, default=7200, metavar="SECONDS",
+        help="wall-clock safety limit for one DSH phase (default: 7200)",
+    )
     parser.add_argument("--model", default="deepseek-v4-flash")
     parser.add_argument("--image", default="proteus-env-dsh-src:0.1.0-rc.8")
     parser.add_argument(
@@ -92,6 +96,8 @@ def main() -> None:
     parser.add_argument("--live-feed", help="optional local copy of the public JSON feed")
     parser.add_argument("--live-watch", type=float, default=15)
     args = parser.parse_args()
+    if args.phase_timeout <= 0:
+        parser.error("--phase-timeout must be positive; use a large value to approximate no timeout")
 
     benchmark = EvaluatorSpec(
         name=NAME,
@@ -103,7 +109,8 @@ def main() -> None:
     cfg = SweepConfig(
         name="dsh-rc8-audio-modality",
         adapter_factory=lambda: DshHarness(
-            image=args.image, permission_mode=args.dsh_permission_mode
+            image=args.image, permission_mode=args.dsh_permission_mode,
+            phase_timeout_s=args.phase_timeout,
         ),
         arms=(NEUTRAL,),
         seeds=1,
