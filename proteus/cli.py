@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from proteus.core.disposition import NEUTRAL, record, review
+from proteus.core.budget import make_budget_plan
 from proteus.core.goal import GoalConfig
 from proteus.sweep import SweepConfig, run_sweep
 
@@ -139,6 +140,24 @@ def _goal(spec: str, evaluators) -> GoalConfig:
     return GoalConfig.of(text=text, evaluators=evaluators)
 
 
+def _phase_turns(spec: str) -> dict[str, int]:
+    """Parse ``observe=40,propose=25,act=200,reflect=35``."""
+    values: dict[str, int] = {}
+    for item in spec.split(","):
+        name, sep, raw = item.strip().partition("=")
+        if not sep or not name or not raw:
+            raise argparse.ArgumentTypeError(
+                "use observe=N,propose=N,act=N,reflect=N"
+            )
+        if name in values:
+            raise argparse.ArgumentTypeError(f"phase {name!r} appears more than once")
+        try:
+            values[name] = int(raw)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"phase {name!r} needs an integer") from None
+    return values
+
+
 def _evaluator(spec: str, adapter_factory):
     """Parse one --evaluator: `<what>[@hidden|@observe]`. Returns (spec, task | None).
 
@@ -213,6 +232,18 @@ def cmd_run(args) -> int:
             f"--min-turns-per-phase={args.min_turns_per_phase} across 4 phases; "
             f"use --max-turns >= {required}"
         )
+    try:
+        make_budget_plan(
+            max_turns=args.max_turns,
+            min_turns_per_phase=args.min_turns_per_phase,
+            phase_turns=args.phase_turns,
+            hard_max_turns=args.hard_max_turns,
+            checkpoint_turns=args.checkpoint_turns,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+    if args.checkpoint_turns and not args.announce_budget:
+        raise SystemExit("--checkpoint-turns requires --announce-budget")
     factory = _harness_factory(args)
     parsed = [_evaluator(e, factory) for e in (args.evaluator or ())]
     evaluators = tuple(spec for spec, _ in parsed)
@@ -241,6 +272,9 @@ def cmd_run(args) -> int:
             ],
         },
         min_turns_per_phase=args.min_turns_per_phase,
+        phase_turns=args.phase_turns,
+        hard_max_turns=args.hard_max_turns,
+        checkpoint_turns=args.checkpoint_turns,
         announce_budget=args.announce_budget,
         on_existing=args.on_existing,
     )
@@ -455,9 +489,19 @@ def main(argv=None) -> int:
                    help="reserve at least this many turns for every phase: a phase that "
                         "would starve the later ones is ended early (max-turns must be "
                         ">= 4x this)")
+    r.add_argument("--phase-turns", type=_phase_turns, default={}, metavar="PLAN",
+                   help="explicit normal allocation, e.g. "
+                        "observe=40,propose=25,act=200,reflect=35; replaces "
+                        "--min-turns-per-phase and must sum to --max-turns")
+    r.add_argument("--hard-max-turns", type=int, default=0, metavar="N",
+                   help="burst ceiling for --phase-turns (default: --max-turns); unused "
+                        "early quota and burst capacity are prioritised for act")
+    r.add_argument("--checkpoint-turns", type=int, default=0, metavar="N",
+                   help="reserve the final N calls of each planned phase for a persistent "
+                        "handoff; requires --phase-turns and --announce-budget")
     r.add_argument("--announce-budget", action="store_true",
-                   help="tell the agent its per-episode tool-call budget in every phase "
-                        "prompt (recorded in the manifest; announcing changes behaviour)")
+                   help="tell the agent its live used/remaining calls and phase allowance "
+                        "(recorded in the manifest; announcing changes behaviour)")
     r.add_argument("--phase-timeout", type=int, default=0, metavar="S",
                    help="wall-clock limit per phase for containerised harnesses "
                         "(default: the adapter's own, 600s)")

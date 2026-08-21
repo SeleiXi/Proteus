@@ -1,6 +1,7 @@
 # The episode: what updates when, and who owns it
 
 Code: [`proteus/core/episode.py`](../proteus/core/episode.py) (the loop),
+[`proteus/core/budget.py`](../proteus/core/budget.py) (budget protocol),
 [`proteus/core/continuity.py`](../proteus/core/continuity.py) (phase handoffs),
 [`proteus/core/goal.py`](../proteus/core/goal.py) (goals and evaluators),
 [`proteus/core/snapshot.py`](../proteus/core/snapshot.py) (snapshots),
@@ -97,12 +98,12 @@ mount prevents the subject from modifying the frozen runtime through an alias pa
 ### 3. Run the episode — the adapter's core
 
 `adapter.run_episode(spec)`, where spec carries the run root, episode number, model, the
-four phase prompts, `max_turns`, and the seed. *How* the phases execute is entirely the
+four phase prompts, budget plan, and seed. *How* the phases execute is entirely the
 adapter's:
 
 - **minimal / llm** (in-process): the four phases run in the framework process, one
-  JSONL trace line per step; `max_turns` is a **hard cap** — stop cleanly, finish the
-  episode;
+  JSONL trace line per step; the effective budget plan is enforced directly — stop
+  cleanly, finish the episode;
 - **dsh / pi** (external CLI): each phase boots a **fresh container**, but all four boot
   the same last-valid source. The private active snapshot mounts read-only at `/workspace`;
   the writable `root/harness` candidate mounts at `/workspace/candidate`; native state is
@@ -114,19 +115,62 @@ adapter's:
   summary is archived. A budget or timeout stop falls back to normalized tool names and
   paths, never raw reasoning or tool results. History lives under
   `.proteus-state/handoffs/epNNN/`, and reflect carries into the next episode.
-  `max_turns` is enforced in two layers, both harness-agnostic: **exactly
+  The effective hard limit is enforced in two layers, both harness-agnostic: **exactly
   between phases** (no new phase once the budget is spent) and **approximately
   mid-phase** (the session log is polled live — pi's is plain JSONL, dsh's flushes one
   zstd frame per event — and the container is stopped when the count crosses the
-  budget). `min_turns_per_phase` additionally reserves turns for later phases: while
-  phase i runs, its stop line is `max_turns - min_turns_per_phase x phases_after_i`, and
-  reaching the line ends the phase, not the episode — so a greedy observe cannot starve
-  act. A budget stop records `turn_capped`, not an error: files already written
+  budget). The legacy `min_turns_per_phase` additionally reserves turns for later phases:
+  while phase i runs, its stop line is
+  `max_turns - min_turns_per_phase x phases_after_i`, and reaching the line ends the phase,
+  not the episode — so a greedy observe cannot starve act. A budget stop records
+  `turn_capped`, not an error: files already written
   persist, the episode snapshots normally, the run continues. `phase_timeout_s` remains
   the wall-clock backstop. With `announce_budget`, the agent is also *told* its budget
   in every phase prompt, so it can plan within it — off by default, because announcing
-  changes behaviour, and recorded in the manifest;
+  changes behaviour, and recorded in the manifest. The phase-aware protocol below is the
+  recommended configuration for longer source-evolution work.
 - **aki**: delegates the episode to Aki's own supervisor.
+
+#### Phase-aware budget protocol v1
+
+`max_turns` remains the **normal planned budget**, so existing configurations retain their
+meaning. An optional explicit plan adds three knobs:
+
+```bash
+--max-turns 300 \
+--phase-turns observe=40,propose=25,act=200,reflect=35 \
+--hard-max-turns 500 \
+--checkpoint-turns 2 \
+--announce-budget
+```
+
+- The four `--phase-turns` values must name every phase, sum exactly to `--max-turns`,
+  and cannot be combined with `--min-turns-per-phase`.
+- Observe and propose may spend only their own planned allowance. If either stops early,
+  its unused calls remain in the pool instead of being consumed by the next planning
+  phase.
+- Act is the borrowing phase: it receives unused observe/propose calls and may use the
+  difference between the normal 300-call plan and the 500-call hard ceiling. Reflect's
+  planned 35 calls stay protected. With full early phases the cumulative stop lines are
+  40, 65, 465, and 500; if an early phase stops short, act receives the difference.
+- At every phase start, bundled budget-aware adapters add the current calls used, hard
+  calls remaining, planned phase allowance, cumulative phase stop, and checkpoint window
+  to that fresh context. The manifest records protocol version, both limits, all four
+  allocations, checkpoint reserve, and `unused_priority: act`; resume locks them as part
+  of the experimental condition.
+- `checkpoint_turns` is an **agent-visible end-of-phase reserve**, not framework-authored
+  memory. With framework continuity, the agent must use it to update
+  `/workspace/.proteus/handoff.md`; Proteus archives that exact text. If it does not,
+  Proteus retains the existing action-only recovery fallback and increments
+  `checkpoint_misses`. It never turns traces or hidden reasoning into a semantic skill,
+  memory, or plan on the harness's behalf.
+
+The hard ceiling is enforcement; the checkpoint window is a protocol the harness must
+honour. An opaque tool loop cannot have an already-executed ordinary call retroactively
+converted into a handoff call, so missed checkpoints are made visible rather than silently
+presented as successful memory. Custom adapters consume the same harness-neutral
+`budget_plan(spec)` and `phase_prompt(spec, phase, used_before)` helpers, then enforce the
+returned cumulative stop in their own native loop.
 
 An exception or `res.ok == False` preserves the partial candidate under
 `refs/proteus/candidates/episode-N-failed`, automatically restores files, index, and HEAD
@@ -245,6 +289,7 @@ evolved memory. Raw conversation and process state never survive.
 | part | where |
 |---|---|
 | phase-prompt assembly rules (where goal / feedback / disposition inject) | `episode._phase_prompts` |
+| phase allocation, hard ceiling, live budget prompt | `budget.py` |
 | framework continuity protocol, redaction, phase history, fallback | `continuity.py` |
 | evaluator timing, visibility, crash degradation, selection | `goal.py` + `episode.run` |
 | snapshots, non-destructive rejection, gapless mapping, no ignore rules | `snapshot.py` |
@@ -280,7 +325,7 @@ evolved memory. Raw conversation and process state never survive.
 | disposition carrier | JSON file | JSON file | `AGENTS.md` block | `AGENTS.md` block | apparatus-native |
 | continuity | none | none | Proteus framework handoff | Proteus framework handoff | native supervisor |
 | self-code | none | none | **real TS source (staged; boundary rebuild)** | **real TS source (staged; boundary rebuild)** | `loop.py` + package copy |
-| iteration bound | `max_turns`, hard | `max_turns`, hard | `max_turns`: exact between phases + mid-phase log watch | `max_turns`: exact between phases + mid-phase log watch | apparatus turn gate |
+| iteration bound | phase plan, direct hard stop | phase plan, direct hard stop | phase plan: exact between phases + mid-phase log watch | phase plan: exact between phases + mid-phase log watch | apparatus turn gate |
 | needs | nothing | API key | Docker + key | Docker + key | the private Aki repo |
 
 ## Failure paths

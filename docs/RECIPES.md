@@ -98,6 +98,27 @@ is blocked from activation and restored as the next episode's writable repair ba
 running harness remains the last-valid snapshot. Containers run as the host uid/gid so
 their bind-mounted files remain editable on Linux.
 
+### Long-form source evolution budget
+
+The 32-call commands above are smoke-sized demonstrations. For a substantial source change
+(for example, adding a modality), start with a phase-aware budget so planning cannot consume
+the implementation window and act can expand without making 500 calls the expected cost:
+
+```bash
+proteus run --harness dsh \
+    --goal "Add robust audio-input support and verify it end to end." \
+    --evaluator step@observe --evaluator tool-calls \
+    --arm neutral --seeds 1 --episodes 30 \
+    --max-turns 300 \
+    --phase-turns observe=40,propose=25,act=200,reflect=35 \
+    --hard-max-turns 500 --checkpoint-turns 2 --announce-budget \
+    --out runs/dsh-audio
+```
+
+This does not ask Proteus to invent memory or skills for DSH. Each fresh phase sees its
+live remaining budget; DSH owns the handoff content, while Proteus archives it and reports
+`checkpoint_misses` if DSH leaves the checkpoint unchanged.
+
 ## Watch, measure, audit, resume, and export
 
 These commands are harness-independent:

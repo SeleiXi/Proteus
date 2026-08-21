@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence, Tuple
 
 from proteus.core.adapter import ActionEvent, EpisodeResult, EpisodeSpec, Surface
+from proteus.core.budget import PHASES, budget_plan, phase_prompt
 from proteus.core.disposition import Disposition
-from proteus.core.episode import PHASES
 
 # A policy maps (phase, prompt, episode, rng) -> list of (tool, surface, text) actions.
 Action = Tuple[str, Optional[str], str]
@@ -94,22 +94,23 @@ class MinimalHarness:
         trace_path.parent.mkdir(parents=True, exist_ok=True)
         turn = 0
         writes = {"notes": 0, "tools": 0}
+        phase_counts = {phase: 0 for phase in PHASES}
         capped = False
-        min_pp = int(getattr(spec, "min_turns_per_phase", 0) or 0)
+        plan = budget_plan(spec)
         with trace_path.open("w", encoding="utf-8") as sink:
-            for idx, phase in enumerate(PHASES):
+            for phase in PHASES:
+                if plan.enabled and turn >= plan.hard_limit:
+                    capped = True
                 if capped:
                     break
-                # the phase's stop line reserves min_turns_per_phase for every later
-                # phase; reaching it ends THIS phase, only a spent budget ends the episode
-                stop_at = (spec.max_turns - min_pp * (len(PHASES) - idx - 1)
-                           if spec.max_turns else 0)
-                prompt = spec.phase_prompts.get(phase, "")
+                stop_at = plan.stop_at(phase, turn)
+                prompt = phase_prompt(spec, phase, turn)
                 for tool, surface, text in self.policy(phase, prompt, spec.episode, rng):
-                    if spec.max_turns and turn >= stop_at:
-                        capped = turn >= spec.max_turns
+                    if plan.enabled and turn >= stop_at:
+                        capped = turn >= plan.hard_limit
                         break
                     turn += 1
+                    phase_counts[phase] += 1
                     if tool == "write_note":
                         (harness / "notes" / f"{text}.md").write_text(
                             f"episode {spec.episode}: {text}\n")
@@ -122,8 +123,10 @@ class MinimalHarness:
                         "turn": turn, "phase": phase, "tool": tool,
                         "surface": surface, "text": text,
                     }) + "\n")
-        return EpisodeResult(episode=spec.episode, ok=True, turns=turn,
-                             counters={"writes": writes, "turn_capped": capped})
+        counters = {"writes": writes, "turn_capped": capped}
+        counters.update({f"phase_{phase}_turns": count
+                         for phase, count in phase_counts.items()})
+        return EpisodeResult(episode=spec.episode, ok=True, turns=turn, counters=counters)
 
     def read_trace(self, root: Path, episode: int) -> Sequence[ActionEvent]:
         path = root / "traces" / f"ep{episode:03d}.jsonl"

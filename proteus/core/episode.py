@@ -25,11 +25,9 @@ from typing import Mapping
 
 from proteus.core import snapshot
 from proteus.core.adapter import EpisodeSpec, HarnessAdapter
+from proteus.core.budget import PHASES, make_budget_plan
 from proteus.core.disposition import Disposition
 from proteus.core.goal import GoalConfig, GoalContext
-
-PHASES = ("observe", "propose", "act", "reflect")
-
 
 def _write_json_atomic(path: Path, value) -> None:
     """Replace one JSON record without exposing a truncated crash-time file."""
@@ -160,6 +158,12 @@ class RunConfig:
     min_turns_per_phase: int = 0
     """Per-phase floor on the turn budget (see EpisodeSpec). `max_turns` must be at
     least `len(PHASES) * min_turns_per_phase`."""
+    phase_turns: Mapping[str, int] = field(default_factory=dict)
+    """Explicit normal allocation for all four phases; must sum to ``max_turns``."""
+    hard_max_turns: int = 0
+    """Burst ceiling for an explicit phase plan. Zero uses ``max_turns``."""
+    checkpoint_turns: int = 0
+    """End-of-phase calls reserved for the harness's persistent handoff mechanism."""
     seed: int = 0
     task: object | None = None
     """A `proteus.bench.BenchTask` to seed before episode 1. Its workspace is
@@ -170,12 +174,11 @@ class RunConfig:
     """Optional isolated runner for agent-authored benchmark code. Local/polyglot use a
     networkless Docker grader by default; host execution is never a fallback."""
     announce_budget: bool = False
-    """Tell the agent its per-episode budget (`max_turns`) in every phase prompt, so it
-    can plan within it. Off by default: announcing the budget changes behaviour — that is
-    the point — so it is an experimental condition, recorded in the manifest, not a
-    silent default. Enforcement is separate and always on where possible: hard cap for
-    in-process harnesses, between-phase budget checks and mid-phase log watching for
-    containerized ones."""
+    """Tell the agent its live phase allocation and episode limits, so it can plan within
+    them. Off by default: announcing a budget changes behaviour — that is the point — so
+    it is an experimental condition, recorded in the manifest, not a silent default.
+    Enforcement is separate and always on where possible: direct stops for in-process
+    harnesses, between-phase checks and mid-phase log watching for containerized ones."""
     progress_path: Path | None = None
     """Where to append one JSON line per finished episode (live tracking). Must live
     OUTSIDE `root`: the subject agent can read its own run root, and a progress record
@@ -232,11 +235,18 @@ def _phase_prompts(cfg: RunConfig, prior_feedback: str) -> dict[str, str]:
         prompts["observe"] = f"{prior_feedback}\n\n{prompts['observe']}"
     # the budget announcement comes first: it frames how the agent plans the episode
     if cfg.announce_budget and cfg.max_turns:
-        note = (f"Budget: you have at most {cfg.max_turns} tool calls in this episode, "
-                "across all phases. Plan within it; the episode ends when it is spent.")
-        if cfg.min_turns_per_phase:
+        hard = cfg.hard_max_turns or cfg.max_turns
+        note = (f"Budget condition: you have at most {hard} tool calls in this episode; "
+                f"the normal plan is {cfg.max_turns} across all phases. The adapter will "
+                "report live used and remaining counts at phase start.")
+        if cfg.phase_turns:
+            allocation = ", ".join(
+                f"{phase}={cfg.phase_turns[phase]}" for phase in PHASES
+            )
+            note += f" Planned phase allocation: {allocation}; unused quota goes to act."
+        elif cfg.min_turns_per_phase:
             note += (f" Each later phase reserves at least {cfg.min_turns_per_phase} "
-                     "of them; a phase may be ended early to protect that reserve.")
+                     "calls; a phase may be ended early to protect that reserve.")
         for ph in PHASES:
             prompts[ph] = f"{note}\n\n{prompts[ph]}"
     # the disposition contributes its (per-phase) text — unless the adapter already carries
@@ -301,11 +311,19 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
     harness = cfg.root / "harness"
     records = private_record_dir(cfg.root)
     staged_activation = bool(getattr(cfg.adapter, "staged_activation", False))
-    if cfg.max_turns and cfg.min_turns_per_phase * len(PHASES) > cfg.max_turns:
+    make_budget_plan(
+        max_turns=cfg.max_turns,
+        min_turns_per_phase=cfg.min_turns_per_phase,
+        phase_turns=cfg.phase_turns,
+        hard_max_turns=cfg.hard_max_turns,
+        checkpoint_turns=cfg.checkpoint_turns,
+    )
+    if cfg.checkpoint_turns and not cfg.announce_budget:
+        raise ValueError("checkpoint_turns requires announce_budget")
+    if cfg.checkpoint_turns and getattr(cfg.adapter, "continuity_mode", "native") == "none":
         raise ValueError(
-            f"max_turns={cfg.max_turns} cannot honour min_turns_per_phase="
-            f"{cfg.min_turns_per_phase}: {len(PHASES)} phases need at least "
-            f"{cfg.min_turns_per_phase * len(PHASES)} turns")
+            "checkpoint_turns requires a harness with native or framework continuity"
+        )
     completed = completed_episodes(cfg)
     is_resume = resume or bool(start)
     if is_resume:
@@ -467,6 +485,9 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
             phase_prompts=_phase_prompts(cfg, prior_feedback),
             max_turns=cfg.max_turns, seed=cfg.seed,
             min_turns_per_phase=cfg.min_turns_per_phase,
+            phase_turns=dict(cfg.phase_turns), hard_max_turns=cfg.hard_max_turns,
+            checkpoint_turns=cfg.checkpoint_turns,
+            announce_budget=cfg.announce_budget,
             continuity_mode=getattr(cfg.adapter, "continuity_mode", "native"),
             active_root=active_root,
         )

@@ -77,6 +77,16 @@ class EpisodeSpec:
     line is `max_turns - min_turns_per_phase * phases_remaining_after_i`: a phase that
     reaches its line is ended early so the later phases keep their reserve. A
     reservation stop moves to the next phase; only a spent budget ends the episode."""
+    phase_turns: Mapping[str, int] = field(default_factory=dict)
+    """Optional explicit normal-plan allocation for observe/propose/act/reflect. When
+    present it replaces ``min_turns_per_phase`` and must sum to ``max_turns``."""
+    hard_max_turns: int = 0
+    """Optional burst ceiling for an explicit phase plan. Zero means ``max_turns``."""
+    checkpoint_turns: int = 0
+    """Final calls in each explicit phase allowance reserved by the prompt protocol for
+    a persistent continuation checkpoint."""
+    announce_budget: bool = False
+    """Whether the adapter should show the live budget contract at phase start."""
     seed: int = 0                    # the run's RNG seed (condition replicate index)
     extra_env: Mapping[str, str] = field(default_factory=dict)
     continuity_mode: str = "native"

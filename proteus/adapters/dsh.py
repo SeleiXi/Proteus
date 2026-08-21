@@ -34,9 +34,9 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from proteus.core.adapter import ActionEvent, EpisodeResult, EpisodeSpec, Surface
+from proteus.core.budget import PHASES, budget_plan, phase_prompt
 from proteus.core.continuity import CONTAINER_ROOT, HandoffStore
 from proteus.core.disposition import Disposition
-from proteus.core.episode import PHASES
 
 IMAGE = os.environ.get("PROTEUS_DSH_IMAGE", "proteus-env-dsh-src:0.1.0-rc.7")
 PHASE_TIMEOUT_S = 600
@@ -327,7 +327,9 @@ class DshHarness:
         mapping: dict[str, list[str]] = {}
         error = ""
         capped = False
-        budget = int(spec.max_turns or 0)
+        checkpoint_misses = 0
+        plan = budget_plan(spec)
+        budget = plan.hard_limit
         episode_dirs: set = set()
         active = Path(spec.active_root) if spec.active_root is not None else harness
         # Core-managed staged episodes already execute a previously validated snapshot.
@@ -347,18 +349,20 @@ class DshHarness:
         workspace_mounts = ((str(active), "/workspace", "ro"),
                             (str(harness), "/workspace/candidate")) \
             if spec.active_root is not None else ((str(harness), "/workspace"),)
-        min_pp = int(getattr(spec, "min_turns_per_phase", 0) or 0)
-        for idx, phase in enumerate(PHASES if not error else ()):
+        for phase in PHASES if not error else ():
             # the budget is enforced twice, both harness-agnostically: exactly, between
             # phases (no new phase once it is spent) and approximately, mid-phase (the
             # session log is polled and the container stopped at the phase's stop line).
-            # The stop line reserves min_turns_per_phase for every later phase, so a
-            # reservation stop moves to the next phase; only a spent budget ends the
+            # BudgetPlan preserves the legacy later-phase reserve or applies the explicit
+            # act-priority plan. A phase stop moves on; only the hard ceiling caps the
             # episode.
-            if budget and self._live_calls(state, episode_dirs, set()) >= budget:
+            used = self._live_calls(state, episode_dirs, set()) if plan.enabled else 0
+            if budget and used >= budget:
                 capped = True
                 break
-            stop_at = budget - min_pp * (len(PHASES) - idx - 1) if budget else 0
+            stop_at = plan.stop_at(phase, used)
+            if budget and used >= stop_at:
+                continue
             handoff_start = handoffs.begin(spec.episode, phase)
             before = self._session_dirs(state)
             fired = [False]
@@ -374,14 +378,14 @@ class DshHarness:
             try:
                 proc = self.sandbox.run(
                     run_root,
-                    ["--profile", "headless", spec.phase_prompts.get(phase, phase)],
+                    ["--profile", "headless", phase_prompt(spec, phase, used)],
                     env={"DEEPSEEK_API_KEY": self.key,
                          "DSH_PERMISSION_MODE": self.permission_mode},
                     timeout_s=self.phase_timeout_s,
                     mounts=workspace_mounts + ((str(state), "/state"),
                             (str(handoffs.root), CONTAINER_ROOT))
                            + self._task_mount(run_root),
-                    stop_check=stop_check if budget else None,
+                    stop_check=stop_check if plan.enabled else None,
                 )
             except subprocess.TimeoutExpired:
                 timed_out = True
@@ -395,8 +399,10 @@ class DshHarness:
                 for session_dir in session_dirs:
                     phase_events.extend(
                         self._session_trace(session_dir, phase, partial=True))
-            handoffs.finish(handoff_start, phase_events,
-                            interrupted=timed_out or fired[0])
+            handoff = handoffs.finish(handoff_start, phase_events,
+                                      interrupted=timed_out or fired[0])
+            if spec.checkpoint_turns and handoff["source"] != "agent":
+                checkpoint_misses += 1
             if timed_out:
                 error = f"phase {phase}: timeout after {self.phase_timeout_s}s"
                 break
@@ -414,10 +420,18 @@ class DshHarness:
         (run_root / "traces" / f"ep{spec.episode:03d}.json").write_text(
             json.dumps(mapping, indent=1))
         trace = self.read_trace(run_root, spec.episode)
+        phase_counts = {
+            phase: sum(1 for event in trace if event.phase == phase and event.tool)
+            for phase in PHASES
+        }
+        counters = {"phases": len(mapping), "turn_capped": capped,
+                    "checkpoint_misses": checkpoint_misses}
+        counters.update({f"phase_{phase}_turns": count
+                         for phase, count in phase_counts.items()})
         return EpisodeResult(
             episode=spec.episode, ok=not error,
             turns=sum(1 for e in trace if e.tool), error=error,
-            counters={"phases": len(mapping), "turn_capped": capped},
+            counters=counters,
         )
 
     def _live_calls(self, state: Path, episode_dirs: set, extra: set) -> int:

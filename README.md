@@ -276,8 +276,9 @@ roots, so the evolving agent can never read its own condition.
 `v0.2.0` (research preview). Working today: the offline `minimal` harness; the live `llm`
 harness; pinned, source-evolving DeepSeek Harness and Pi adapters with frozen per-episode
 activation, automatic rollback, exact-tree boundary gates, rebuild caching, turn budgets,
-and task mounts; the Aki research adapter;
-local, Polyglot, and SWE-bench task integrations; resume-safe sweeps; the full measurement,
+phase-aware act-priority budget plans and agent-authored checkpoint tracking, and task
+mounts; the Aki research adapter; local, Polyglot, and SWE-bench task integrations;
+resume-safe sweeps; the full measurement,
 audit, reliability, report, and repository-export paths; and adapter/environment tooling.
 CI covers Python 3.10–3.14. The separate release-smoke workflow runs two episodes across
 the public release set (`minimal`, `llm`, `dsh`, `pi`), exercises the benchmark path, and
