@@ -155,15 +155,24 @@ def main() -> int:
                       "no src/ change between episode 0 and the second-to-last snapshot")
                 # 2) machine evidence the edited source was rebuilt and booted: the boot
                 # wrapper writes a dist cache tar only when it builds a non-pristine
-                # source, and a boot right now must hit that cache rather than rebuild
-                state = next((d for d in run_root.iterdir()
-                              if d.is_dir() and d.name.endswith("-state")), None)
-                tars_before = set(state.glob("dist-*.tar")) if state else set()
+                # source, and a boot right now must hit that cache rather than rebuild.
+                # Since v0.2.0 framework continuity adds `.proteus-state` beside the
+                # adapter's own `*-state` dir, and iterdir() order is arbitrary — union
+                # the glob over every adapter state dir instead of trusting `next()`.
+                state_dirs = [d for d in run_root.iterdir()
+                              if d.is_dir() and d.name.endswith("-state")
+                              and d.name != ".proteus-state"]
+
+                def _dist_tars() -> set:
+                    return {t for d in state_dirs for t in d.glob("dist-*.tar")}
+
+                tars_before = _dist_tars()
                 check(bool(tars_before),
-                      "a rebuild happened during the run (dist cache exists)")
+                      "a rebuild happened during the run (dist cache exists)",
+                      f"no dist-*.tar under {[d.name for d in state_dirs]}")
                 boot_msg = adapter.check_boot(run_root / "harness")
-                tars_after = set(state.glob("dist-*.tar")) if state else set()
-                check(boot_msg == "" and tars_after == tars_before,
+                tars_after = _dist_tars()
+                check(boot_msg == "" and bool(tars_before) and tars_after == tars_before,
                       "booting the final source hits the cache (it was built and "
                       "loaded during the run)",
                       boot_msg or f"new tars: {[t.name for t in tars_after - tars_before]}")
