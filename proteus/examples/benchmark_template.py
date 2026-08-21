@@ -8,7 +8,7 @@ to score without conditioning. `proteus.bench.local` / `polyglot` / `swe` are th
 instances; this is the smallest one that shows the whole shape.
 
     python -m proteus.scaffold benchmark <yourname>   # copy + rename this file
-    python examples/benchmark_template.py             # run the demo below, offline
+    python -m proteus.examples.benchmark_template             # run the demo below, offline
 
 The task workspace (`<run>/task/`) lives OUTSIDE the harness snapshot on purpose: it is
 the exercise, not the subject — it moves only forward, and selection rolls back the

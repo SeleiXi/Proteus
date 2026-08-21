@@ -220,7 +220,7 @@ proteus run   --harness mypkg.theirs_adapter:TheirsHarness --arm neutral ...
 round-trip, snapshot-ability, trace shape). The full guide: [docs/ADAPTERS.md](docs/ADAPTERS.md).
 To start from a working skeleton instead of a blank file,
 `python -m proteus.scaffold adapter MyHarness` copies the fully-commented
-[examples/adapter_template.py](examples/adapter_template.py) — see
+[proteus/examples/adapter_template.py](proteus/examples/adapter_template.py) — see
 [CONTRIBUTING.md](CONTRIBUTING.md). The templates ship on PyPI too; outside a Git checkout
 the default output is the current directory (or choose an explicit `--dest`).
 

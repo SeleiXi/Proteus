@@ -31,7 +31,7 @@ code that path imports.
 ## Adding a harness adapter
 
 An adapter is one class implementing seven methods (see the fully-commented
-[`examples/adapter_template.py`](examples/adapter_template.py) and the contract in
+[`proteus/examples/adapter_template.py`](proteus/examples/adapter_template.py) and the contract in
 [`proteus/core/adapter.py`](proteus/core/adapter.py)). The framework handles episodes,
 snapshots, dispositions, goals, and measurement; you provide the harness-specific glue.
 
@@ -91,7 +91,7 @@ and [`environments/README.md`](environments/README.md).
 
 A benchmark is a `BenchTask`: goal text, a `setup(ws)` that seeds the task workspace, and
 a `grade(ws)` that returns an `EvalResult`. See
-[`examples/benchmark_template.py`](examples/benchmark_template.py), the contract in
+[`proteus/examples/benchmark_template.py`](proteus/examples/benchmark_template.py), the contract in
 [`proteus/bench/task.py`](proteus/bench/task.py), and the shipped
 [`proteus/bench/local.py`](proteus/bench/local.py) / `polyglot.py` / `swe.py`.
 
@@ -111,7 +111,7 @@ a `grade(ws)` that returns an `EvalResult`. See
    > the agent's code through [`proteus/bench/sandbox.py`](proteus/bench/sandbox.py)
    > (`run_python`), which never falls back to host Python — this is what `local.py` and
    > `polyglot.py` do. A plain host `subprocess` is acceptable only for a trusted, local
-   > benchmark; see the note in `examples/benchmark_template.py`.
+   > benchmark; see the note in `proteus/examples/benchmark_template.py`.
 
 3. **Wire and test.** `as_goal(TASK)` conditions a run on the task; `as_evaluator(TASK)`
    scores without conditioning. Add a small grader test (solved → `1.0`, empty → `0.0`)
