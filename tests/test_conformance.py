@@ -115,6 +115,25 @@ def test_scaffold_adapter_roundtrip(tmp_path):
     assert check_adapter(cls(), episode=True, verbose=False) == []
 
 
+def test_adapter_factory_loads_scaffold_from_console_script_cwd(tmp_path, monkeypatch):
+    """Installed ``proteus`` scripts do not automatically put their cwd on sys.path."""
+    import sys
+
+    from proteus.cli import _adapter_factory
+    from proteus.scaffold import scaffold_adapter
+
+    scaffold_adapter("CwdHarness", tmp_path / "cwd.py")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p not in ("", str(tmp_path))])
+    sys.modules.pop("cwd", None)
+    try:
+        cls = _adapter_factory("cwd:CwdHarness")
+        assert cls.name == "cwd"
+        assert check_adapter(cls(), episode=True, verbose=False) == []
+    finally:
+        sys.modules.pop("cwd", None)
+
+
 def test_scaffold_benchmark_roundtrip(tmp_path):
     from proteus.bench.task import BenchTask
     from proteus.scaffold import scaffold_benchmark

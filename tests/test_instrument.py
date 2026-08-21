@@ -318,33 +318,138 @@ def _sweep_cfg(root: Path, **kw):
 
 
 def test_second_sweep_into_the_same_root_refuses(tmp_path):
+    import json
+
     from proteus.sweep import run_sweep
     root = tmp_path / "out"
     run_sweep(_sweep_cfg(root))
+    manifest = root / "manifest.json"
+    before = manifest.read_bytes()
+    changed = _sweep_cfg(root)
+    changed.model = "different-model"
     try:
-        run_sweep(_sweep_cfg(root))
+        run_sweep(changed)
     except FileExistsError as exc:
-        assert "on_existing" in str(exc)
+        assert "Refusing before changing" in str(exc)
     else:
         raise AssertionError("a second sweep silently reused the evolved run root")
+    assert manifest.read_bytes() == before, "a refused sweep rewrote the original manifest"
+    assert json.loads(manifest.read_text())["model"] == "mock"
 
 
 def test_sweep_manifest_records_the_model(tmp_path):
     import json
+    from proteus import __version__
     from proteus.sweep import run_sweep
 
     root = tmp_path / "out"
     run_sweep(_sweep_cfg(root))
     manifest = json.loads((root / "manifest.json").read_text())
     assert manifest["model"] == "mock"
+    assert manifest["condition"]["proteus_version"] == __version__
 
 
 def test_resume_skips_completed_seeds(tmp_path):
     from proteus.sweep import run_sweep
     root = tmp_path / "out"
     first = run_sweep(_sweep_cfg(root))
+    manifest = (root / "manifest.json").read_bytes()
     again = run_sweep(_sweep_cfg(root, on_existing="resume"))
     assert first and again == [], "resume re-ran a finished seed"
+    assert (root / "manifest.json").read_bytes() == manifest
+
+
+def test_resume_rejects_a_changed_experimental_condition(tmp_path):
+    import json
+
+    from proteus.core import GoalConfig
+    from proteus.sweep import SweepStateError, run_sweep
+
+    root = tmp_path / "out"
+    run_sweep(_sweep_cfg(root))
+    manifest = root / "manifest.json"
+    before = manifest.read_bytes()
+    changed = _sweep_cfg(root, on_existing="resume")
+    changed.goal = GoalConfig.of(text="a different objective")
+    changed.condition_metadata = {"evaluator_specs": ["tool-calls@observe"]}
+    from proteus.sandbox import LocalSandbox
+    changed.grader_sandbox = LocalSandbox()
+    try:
+        run_sweep(changed)
+    except SweepStateError as exc:
+        assert "condition differs" in str(exc)
+        assert "goal" in str(exc) and "metadata" in str(exc)
+        assert "grader_sandbox" in str(exc)
+    else:
+        raise AssertionError("resume mixed two experimental conditions")
+    assert manifest.read_bytes() == before, "a rejected resume rewrote the manifest"
+    assert json.loads(manifest.read_text())["goal"] == ""
+
+
+def test_manifest_fingerprints_private_sandbox_values(tmp_path):
+    import json
+
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.sandbox import DockerSandbox, SandboxConfig
+    from proteus.sweep import _adapter_condition
+
+    adapter = MinimalHarness()
+    adapter.sandbox = DockerSandbox(SandboxConfig(
+        env={"SERVICE_TOKEN": "do-not-publish"},
+        extra_mounts=((str(tmp_path / "private"), "/workspace/private"),),
+        extra_args=("--secret=also-private",),
+    ))
+    encoded = json.dumps(_adapter_condition(adapter), sort_keys=True)
+    assert "SERVICE_TOKEN" in encoded
+    assert "do-not-publish" not in encoded
+    assert str(tmp_path / "private") not in encoded
+    assert "also-private" not in encoded
+
+
+def test_resume_from_episode_zero_discards_a_crash_time_candidate(tmp_path):
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core import EpisodeResult, GoalConfig, NEUTRAL, snapshot
+    from proteus.sweep import SweepConfig, opaque_id, run_sweep
+
+    class CrashOnceHarness(MinimalHarness):
+        continuity_mode = "framework"
+        attempts = 0
+
+        def run_episode(self, spec):
+            if type(self).attempts == 0:
+                type(self).attempts += 1
+                (spec.root / "harness" / "FIRST_PARTIAL.md").write_text("first attempt\n")
+                return EpisodeResult(spec.episode, ok=False, error="simulated power loss")
+            return super().run_episode(spec)
+
+    root = tmp_path / "episode-zero"
+
+    def config(on_existing="refuse"):
+        return SweepConfig(
+            name="ep0", adapter_factory=CrashOnceHarness, arms=[NEUTRAL], seeds=1,
+            goal=GoalConfig(), root=root, model="mock", episodes=1,
+            on_existing=on_existing,
+        )
+
+    first = run_sweep(config())
+    assert first[0]["episodes_complete"] == 0 and first[0]["error"]
+    run_root = root / "runs" / opaque_id("neutral", 0)
+    harness = run_root / "harness"
+    assert snapshot.commit_for_episode(harness, 0)
+
+    # This edit represents a SIGKILL after the framework's last handler ran. With no
+    # completed episode, the old implementation confused resume with a fresh seed and
+    # committed this dirty file into episode 1.
+    (harness / "CRASH_PARTIAL.md").write_text("must be discarded\n")
+    (run_root / ".proteus-state").mkdir(exist_ok=True)
+    (run_root / ".proteus-state" / "latest.md").write_text("partial handoff\n")
+
+    resumed = run_sweep(config("resume"))
+    assert resumed[0]["episodes_complete"] == 1 and not resumed[0]["error"]
+    assert not (harness / "CRASH_PARTIAL.md").exists()
+    assert not (harness / "FIRST_PARTIAL.md").exists()
+    assert not (run_root / ".proteus-state" / "latest.md").exists()
+    assert snapshot.commit_for_episode(harness, 1)
 
 
 # ------------------------------------------------------------------- user-set limits

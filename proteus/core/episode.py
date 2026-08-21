@@ -206,14 +206,16 @@ def completed_episodes(cfg: RunConfig) -> int:
     return ep
 
 
-def run(cfg: RunConfig, start: int = 0) -> RunResult:
+def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
     """Run one seed's full trajectory, harness retained under `cfg.root`.
 
     `start` resumes an interrupted seed: episodes up to and including `start` are taken as
-    done and the harness on disk is used as-is. Re-seeding a resumed root would overwrite
-    the evolved harness with fresh templates, so provisioning is skipped entirely — at
-    tens of minutes per episode, restarting a seed that died at episode 26 throws away
-    real trajectory, which is why this exists.
+    done and the harness on disk is used as-is. `resume=True` is required to distinguish
+    recovery from episode 0 from a genuinely fresh run — both have `start == 0`, but only
+    the former already has a snapshot that must be restored before retrying episode 1.
+    Any positive `start` implies resume for backward compatibility. Re-seeding a resumed
+    root would overwrite the evolved harness with fresh templates, so provisioning is
+    skipped entirely.
     """
     harness = cfg.root / "harness"
     if cfg.max_turns and cfg.min_turns_per_phase * len(PHASES) > cfg.max_turns:
@@ -222,7 +224,8 @@ def run(cfg: RunConfig, start: int = 0) -> RunResult:
             f"{cfg.min_turns_per_phase}: {len(PHASES)} phases need at least "
             f"{cfg.min_turns_per_phase * len(PHASES)} turns")
     completed = completed_episodes(cfg)
-    if start:
+    is_resume = resume or bool(start)
+    if is_resume:
         if completed != start:
             raise ValueError(
                 f"cannot resume {cfg.root} at episode {start}: snapshot history has "
@@ -260,19 +263,20 @@ def run(cfg: RunConfig, start: int = 0) -> RunResult:
     history_path = eval_history_path(cfg.root)
     fingerprint_path = records / "disposition_fingerprint.json"
     fingerprint = cfg.adapter.disposition_fingerprint(harness)
-    if not start:
+    if not is_resume:
         _write_json_atomic(fingerprint_path, {"fingerprint": fingerprint})
-    if start:
-        if not history_path.exists():
+    if is_resume:
+        if start and not history_path.exists():
             raise ValueError(
                 f"cannot resume {cfg.root}: {start} episodes are snapshotted but "
                 f"private eval history is missing at {history_path}")
-        try:
-            eval_history = json.loads(history_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
-            raise ValueError(
-                f"cannot resume {cfg.root}: private eval history is unreadable: {exc}"
-            ) from exc
+        if history_path.exists():
+            try:
+                eval_history = json.loads(history_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                raise ValueError(
+                    f"cannot resume {cfg.root}: private eval history is unreadable: {exc}"
+                ) from exc
         expected = list(range(1, start + 1))
         recorded = [row.get("episode") for row in eval_history]
         if len(eval_history) != start or recorded != expected:
@@ -283,12 +287,21 @@ def run(cfg: RunConfig, start: int = 0) -> RunResult:
             installed = json.loads(fingerprint_path.read_text(encoding="utf-8"))
             fingerprint = str(installed["fingerprint"])
         except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
-            raise ValueError(
-                f"cannot resume {cfg.root}: disposition fingerprint record is unreadable: "
-                f"{exc}"
-            ) from exc
+            if start:
+                raise ValueError(
+                    f"cannot resume {cfg.root}: disposition fingerprint record is unreadable: "
+                    f"{exc}"
+                ) from exc
+            # A machine can die after episode-0 is committed but before this small private
+            # record is replaced. The restored checkpoint is the only completed state, so
+            # its fingerprint is a safe baseline from which to reconstruct the record.
+            fingerprint = cfg.adapter.disposition_fingerprint(harness)
+            _write_json_atomic(fingerprint_path, {"fingerprint": fingerprint})
         current = cfg.adapter.disposition_fingerprint(harness)
-        checkpoint_fingerprint = str(eval_history[-1].get("disposition_fingerprint", ""))
+        checkpoint_fingerprint = (
+            str(eval_history[-1].get("disposition_fingerprint", ""))
+            if start else fingerprint
+        )
         if not checkpoint_fingerprint or current != checkpoint_fingerprint:
             raise ValueError(
                 f"cannot resume {cfg.root}: current disposition fingerprint {current!r} "

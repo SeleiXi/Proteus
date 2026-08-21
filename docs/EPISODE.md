@@ -24,12 +24,15 @@ are identical.
 | 3. task seeding (benchmark runs only) | framework | `seed_task` writes the benchmark task into `<run>/task/`, beside the harness and outside its snapshot; dsh/pi mount it at `/workspace/task` |
 | 4. `snapshot.init(harness)` | framework | bare git repo; **every ignore rule disabled** (the harness is the measured object — nothing in it may be invisible to the instrument); commit `episode 0` |
 
-Resume (`run(cfg, start=N)`) skips all four and continues on the evolved harness on
-disk from episode N+1. `completed_episodes` counts **contiguous snapshot commits**, not
-trace files — a provider outage writes a trace per failed attempt. Before any resume,
-Proteus restores files, index, and HEAD to the exact episode-N checkpoint. This removes a
-half-written candidate left by SIGKILL or a machine restart before it can leak into the
-next attempt.
+Resume (`run(cfg, start=N, resume=True)`) skips all four and continues on the evolved
+harness on disk from episode N+1. Positive `start` values imply resume for API
+compatibility; the explicit flag matters at N=0, where a new run and a crashed-before-
+episode-1 run otherwise look identical. `completed_episodes` counts **contiguous snapshot
+commits**, not trace files — a provider outage writes a trace per failed attempt. Before
+any resume, Proteus restores files, index, and HEAD to the exact episode-N checkpoint
+(including episode 0), reconciles the framework handoff, and verifies private records.
+This removes a half-written candidate left by SIGKILL or a machine restart before it can
+leak into the next attempt.
 
 ## Every episode N
 
@@ -214,6 +217,12 @@ Both evaluator history and the initial/candidate/checkpoint disposition fingerpr
 under the sibling `.proteus-records/<run-id>/`, never inside the subject-visible run root.
 Resume requires the snapshot count, history rows, continuity checkpoint, and current
 fingerprint to agree with the last durable checkpoint.
+
+At sweep level, `manifest.json` carries a versioned immutable `condition` record: adapter
+identity/runtime knobs, surfaces, disposition fingerprints, model, goal, evaluators, task,
+budgets, continuity, and caller-supplied non-secret metadata. `--on-existing resume`
+compares it before touching the run; `refuse` also checks before writing anything. A v0.1
+manifest has no condition lock and is deliberately not resumable under v0.2.
 
 ### 10. Next episode — framework
 
