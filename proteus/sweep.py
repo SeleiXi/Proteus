@@ -123,6 +123,7 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
     (cfg.root / "manifest.json").write_text(json.dumps({
         "name": cfg.name, "episodes": cfg.episodes,
         "arms": [a.label for a in cfg.arms], "seeds": cfg.seeds, "runs": runs,
+        "model": cfg.model,
         "goal": cfg.goal.goal_text(),
         "evaluators": cfg.goal.describe(),
         "announce_budget": cfg.announce_budget,

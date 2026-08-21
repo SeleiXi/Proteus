@@ -302,6 +302,16 @@ def test_second_sweep_into_the_same_root_refuses(tmp_path):
         raise AssertionError("a second sweep silently reused the evolved run root")
 
 
+def test_sweep_manifest_records_the_model(tmp_path):
+    import json
+    from proteus.sweep import run_sweep
+
+    root = tmp_path / "out"
+    run_sweep(_sweep_cfg(root))
+    manifest = json.loads((root / "manifest.json").read_text())
+    assert manifest["model"] == "mock"
+
+
 def test_resume_skips_completed_seeds(tmp_path):
     from proteus.sweep import run_sweep
     root = tmp_path / "out"
