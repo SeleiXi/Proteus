@@ -7,6 +7,7 @@ from proteus.core.adapter import (
 )
 from proteus.core.disposition import NEUTRAL, Disposition, record, review
 from proteus.core.continuity import HandoffStore, PROTOCOL_VERSION
+from proteus.core.budget import BUDGET_PROTOCOL_VERSION, BudgetPlan, budget_plan
 from proteus.core.episode import RunConfig, RunResult, run
 from proteus.core.goal import (
     EvalResult,
@@ -21,6 +22,8 @@ from proteus.core.goal import (
 __all__ = [
     "NEUTRAL",
     "ActionEvent",
+    "BUDGET_PROTOCOL_VERSION",
+    "BudgetPlan",
     "Disposition",
     "EpisodeResult",
     "EpisodeSpec",
@@ -37,6 +40,7 @@ __all__ = [
     "RunResult",
     "Surface",
     "Visibility",
+    "budget_plan",
     "record",
     "review",
     "run",

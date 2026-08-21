@@ -123,6 +123,32 @@ archives `handoffs/epNNN/<phase>.{json,md}`, carries reflect into the next episo
 falls back to normalized tool names and paths after an interruption. Never persist raw
 model reasoning or tool results. DSH and Pi are the reference integrations.
 
+Every adapter receives the same optional phase-aware budget fields in `EpisodeSpec`.
+Use the core helpers rather than reproducing allocation arithmetic inside the adapter:
+
+```python
+from proteus.core.budget import PHASES, budget_plan, phase_prompt
+
+plan = budget_plan(spec)
+used = 0
+for phase in PHASES:
+    if plan.enabled and used >= plan.hard_limit:
+        break
+    stop_at = plan.stop_at(phase, used)
+    prompt = phase_prompt(spec, phase, used)
+    # Run the native phase with `prompt`; stop its native call loop at `stop_at`.
+    # Refresh `used` from the native trace before starting the next phase.
+```
+
+`budget_plan` preserves legacy `max_turns` / `min_turns_per_phase` behavior and validates
+the explicit normal plan, hard ceiling, act-priority borrowing, and checkpoint reserve.
+`phase_prompt` adds live used/remaining values only when `announce_budget` is part of the
+condition. For an external process, enforce the cumulative stop both between phases and
+by watching its native log during a phase. The adapter defines what one native call is,
+but must use the same definition for stopping, `EpisodeResult.turns`, and trace counters.
+Do not implement checkpointing by synthesizing semantic memory: a framework-continuity
+adapter archives the agent-written handoff and reports a miss when it remains unchanged.
+
 ### 5. Fingerprint
 `disposition_fingerprint` hashes the currently-installed disposition carrier. The core
 records the initial value and every candidate/checkpoint value outside the run root, so F
@@ -167,6 +193,8 @@ but the adapter still owns how the harness sees files.
 - [ ] surfaces declared as data (or established by convention in `seed`)
 - [ ] disposition install is removable — `proteus check` passes
 - [ ] trace parsed from the harness's own logs into `ActionEvent`s
+- [ ] budget-aware loop consumes `budget_plan(spec)`, shows `phase_prompt(...)`, and
+      enforces the returned cumulative stop using the same call unit as its trace
 - [ ] continuity mode declared when not native; framework state remains outside the
       harness snapshot
 - [ ] self-code adapter declares `staged_activation`; every phase uses the same read-only

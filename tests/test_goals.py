@@ -289,3 +289,35 @@ def test_cli_rejects_invalid_turn_reservations_without_traceback(tmp_path):
         assert "use --max-turns >= 8" in str(exc)
     else:
         raise AssertionError("invalid reservation was accepted")
+
+
+def test_cli_accepts_and_records_an_explicit_phase_budget(tmp_path):
+    import json
+    from proteus import cli
+
+    root = tmp_path / "phase-budget"
+    rc = cli.main([
+        "run", "--harness", "minimal", "--arm", "neutral", "--seeds", "1",
+        "--episodes", "1", "--max-turns", "8", "--hard-max-turns", "12",
+        "--phase-turns", "observe=2,propose=2,act=2,reflect=2",
+        "--announce-budget", "--out", str(root),
+    ])
+    assert rc == 0
+    manifest = json.loads((root / "manifest.json").read_text())
+    assert manifest["budget"]["hard_limit"] == 12
+
+
+def test_checkpoint_budget_requires_announcement(tmp_path):
+    from proteus import cli
+
+    try:
+        cli.main([
+            "run", "--harness", "dsh", "--arm", "neutral", "--seeds", "1",
+            "--episodes", "1", "--max-turns", "8",
+            "--phase-turns", "observe=2,propose=2,act=2,reflect=2",
+            "--checkpoint-turns", "1", "--out", str(tmp_path / "bad-checkpoint"),
+        ])
+    except SystemExit as exc:
+        assert "requires --announce-budget" in str(exc)
+    else:
+        raise AssertionError("a hidden checkpoint reserve was accepted")

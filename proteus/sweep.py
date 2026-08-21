@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from proteus.core.adapter import HarnessAdapter
+from proteus.core.budget import BUDGET_PROTOCOL_VERSION, PHASES, make_budget_plan
 from proteus.core.continuity import PROTOCOL_VERSION
 from proteus.core.disposition import Disposition
 from proteus.core.episode import RunConfig, completed_episodes, run
@@ -135,7 +136,7 @@ def _condition(cfg: "SweepConfig", adapter: HarnessAdapter) -> dict:
             "id": str(getattr(cfg.task, "id", type(cfg.task).__name__)),
             "base_commit": str(getattr(cfg.task, "base_commit", "")),
         }
-    return {
+    condition = {
         "proteus_version": __version__,
         "continuity_protocol_version": (
             PROTOCOL_VERSION
@@ -158,6 +159,23 @@ def _condition(cfg: "SweepConfig", adapter: HarnessAdapter) -> dict:
         "grader_sandbox": _sandbox_condition(cfg.grader_sandbox),
         "metadata": _json_value(cfg.condition_metadata),
     }
+    if cfg.phase_turns or cfg.hard_max_turns or cfg.checkpoint_turns:
+        plan = make_budget_plan(
+            max_turns=cfg.max_turns,
+            min_turns_per_phase=cfg.min_turns_per_phase,
+            phase_turns=cfg.phase_turns,
+            hard_max_turns=cfg.hard_max_turns,
+            checkpoint_turns=cfg.checkpoint_turns,
+        )
+        condition["budget_protocol"] = {
+            "version": BUDGET_PROTOCOL_VERSION,
+            "normal_limit": plan.normal_limit,
+            "hard_limit": plan.hard_limit,
+            "phase_turns": {phase: plan.phase_allowances[phase] for phase in PHASES},
+            "checkpoint_turns": plan.checkpoint_turns,
+            "unused_priority": "act",
+        }
+    return condition
 
 
 def _write_json_atomic(path: Path, value: Any) -> None:
@@ -193,6 +211,9 @@ class SweepConfig:
     grader_sandbox: object | None = None
     """Optional isolated grader runner propagated to every benchmark evaluator."""
     min_turns_per_phase: int = 0
+    phase_turns: Mapping[str, int] = field(default_factory=dict)
+    hard_max_turns: int = 0
+    checkpoint_turns: int = 0
     announce_budget: bool = False
     on_existing: str = "refuse"
     """What to do when a run root is already there: "refuse" (default), "resume", or
@@ -263,6 +284,21 @@ def completed_episodes_in(run_root: Path) -> int:
 def run_sweep(cfg: SweepConfig) -> list[dict]:
     if cfg.on_existing not in ("refuse", "resume", "overwrite"):
         raise ValueError(f"on_existing must be refuse/resume/overwrite, got {cfg.on_existing!r}")
+    plan = make_budget_plan(
+        max_turns=cfg.max_turns,
+        min_turns_per_phase=cfg.min_turns_per_phase,
+        phase_turns=cfg.phase_turns,
+        hard_max_turns=cfg.hard_max_turns,
+        checkpoint_turns=cfg.checkpoint_turns,
+    )
+    if cfg.checkpoint_turns and not cfg.announce_budget:
+        raise ValueError("checkpoint_turns requires announce_budget")
+    manifest_adapter = cfg.adapter_factory()
+    continuity_mode = getattr(manifest_adapter, "continuity_mode", "native")
+    if cfg.checkpoint_turns and continuity_mode == "none":
+        raise ValueError(
+            "checkpoint_turns requires a harness with native or framework continuity"
+        )
     cfg.root.mkdir(parents=True, exist_ok=True)
     runs = [{"id": opaque_id(arm.label, s), "arm": arm.label, "seed": s}
             for arm in cfg.arms for s in range(cfg.seeds)]
@@ -275,8 +311,6 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
 
     # Constructing the declaration adapter is side-effect free. Its public runtime knobs
     # form part of the condition; credentials are deliberately never inspected.
-    manifest_adapter = cfg.adapter_factory()
-    continuity_mode = getattr(manifest_adapter, "continuity_mode", "native")
     condition = _condition(cfg, manifest_adapter)
 
     # Validate before mutating anything. Previously even a refused second invocation
@@ -335,6 +369,15 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
         },
         "condition": condition,
     }
+    if plan.explicit:
+        manifest["budget"] = {
+            "protocol_version": BUDGET_PROTOCOL_VERSION,
+            "normal_limit": plan.normal_limit,
+            "hard_limit": plan.hard_limit,
+            "phase_turns": {phase: plan.phase_allowances[phase] for phase in PHASES},
+            "checkpoint_turns": plan.checkpoint_turns,
+            "unused_priority": "act",
+        }
     # Preserve an already-validated resume manifest exactly. A refused or failed resume
     # must be observationally read-only; a new/overwrite sweep publishes atomically.
     if existing_manifest is None:
@@ -361,6 +404,8 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
                 goal=cfg.goal, root=run_root, model=cfg.model,
                 episodes=cfg.episodes, max_turns=cfg.max_turns, seed=s,
                 min_turns_per_phase=cfg.min_turns_per_phase,
+                phase_turns=dict(cfg.phase_turns), hard_max_turns=cfg.hard_max_turns,
+                checkpoint_turns=cfg.checkpoint_turns,
                 announce_budget=cfg.announce_budget, task=cfg.task,
                 grader_sandbox=cfg.grader_sandbox,
                 progress_path=cfg.root / "progress" / f"{rid}.jsonl",

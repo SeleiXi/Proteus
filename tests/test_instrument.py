@@ -527,6 +527,30 @@ def test_sweep_manifest_records_the_model(tmp_path):
     manifest = json.loads((root / "manifest.json").read_text())
     assert manifest["model"] == "mock"
     assert manifest["condition"]["proteus_version"] == __version__
+    assert "budget" not in manifest
+    assert "budget_protocol" not in manifest["condition"]
+
+
+def test_sweep_manifest_records_the_full_budget_protocol(tmp_path):
+    import json
+    from proteus.sweep import run_sweep
+
+    cfg = _sweep_cfg(
+        tmp_path / "budgeted", max_turns=12, hard_max_turns=20,
+        phase_turns={"observe": 2, "propose": 2, "act": 6, "reflect": 2},
+        announce_budget=True,
+    )
+    run_sweep(cfg)
+    manifest = json.loads((cfg.root / "manifest.json").read_text())
+    assert manifest["budget"] == {
+        "protocol_version": 1,
+        "normal_limit": 12,
+        "hard_limit": 20,
+        "phase_turns": {"observe": 2, "propose": 2, "act": 6, "reflect": 2},
+        "checkpoint_turns": 0,
+        "unused_priority": "act",
+    }
+    assert manifest["condition"]["budget_protocol"]["hard_limit"] == 20
 
 
 def test_resume_skips_completed_seeds(tmp_path):

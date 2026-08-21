@@ -284,6 +284,24 @@ def test_source_hash_frames_file_boundaries_and_symlinks(tmp_path):
 
 # ------------------------------------------------------------------- turn budget
 
+def test_explicit_budget_validation_is_strict():
+    from proteus.core.budget import make_budget_plan
+
+    base = {"observe": 2, "propose": 2, "act": 6, "reflect": 2}
+    invalid = [
+        ({"phase_turns": {**base, "act": 5}}, "sum to 11"),
+        ({"phase_turns": base, "hard_max_turns": 11}, "must be at least"),
+        ({"phase_turns": base, "min_turns_per_phase": 1}, "cannot be combined"),
+        ({"phase_turns": base, "checkpoint_turns": 3}, "smallest"),
+    ]
+    for overrides, expected in invalid:
+        try:
+            make_budget_plan(max_turns=12, **overrides)
+        except ValueError as exc:
+            assert expected in str(exc)
+        else:
+            raise AssertionError(f"invalid budget was accepted: {overrides}")
+
 def test_budget_stops_new_phases_exactly(tmp_path):
     # the between-phase check is exact and needs nothing from the log format
     from proteus.core.adapter import EpisodeSpec
@@ -450,3 +468,114 @@ def test_budget_must_cover_the_reserves(tmp_path):
         assert "min_turns_per_phase" in str(exc)
     else:
         raise AssertionError("a budget below 4x the reserve must be refused")
+
+
+def test_explicit_phase_budget_gives_unused_and_burst_capacity_to_act(tmp_path):
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core import NEUTRAL, GoalConfig
+    from proteus.core.episode import RunConfig, run
+
+    def policy(phase, prompt, episode, rng):
+        count = 1 if phase in ("observe", "propose") else 50
+        return [("read_state", None, f"{phase}-{i}") for i in range(count)]
+
+    adapter = MinimalHarness(policy=policy)
+    result = run(RunConfig(
+        name="budget", adapter=adapter, disposition=NEUTRAL, goal=GoalConfig(),
+        root=tmp_path / "explicit", model="mock", episodes=1,
+        max_turns=12, hard_max_turns=20,
+        phase_turns={"observe": 2, "propose": 2, "act": 6, "reflect": 2},
+    ))
+    trace = adapter.read_trace(tmp_path / "explicit", 1)
+    counts = {phase: sum(event.phase == phase for event in trace)
+              for phase in ("observe", "propose", "act", "reflect")}
+    assert counts == {"observe": 1, "propose": 1, "act": 16, "reflect": 2}
+    assert result.eval_history[0]["counters"]["phase_act_turns"] == 16
+
+
+def test_explicit_phase_budget_does_not_let_reflect_borrow_act_capacity(tmp_path):
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core.adapter import EpisodeSpec
+
+    def policy(phase, prompt, episode, rng):
+        count = 50 if phase == "reflect" else 1
+        return [("read_state", None, f"{phase}-{i}") for i in range(count)]
+
+    adapter = MinimalHarness(policy=policy)
+    root = tmp_path / "reflect-cap"
+    adapter.seed(root / "harness")
+    result = adapter.run_episode(EpisodeSpec(
+        root=root, episode=1, model="mock", phase_prompts={},
+        max_turns=12, hard_max_turns=20,
+        phase_turns={"observe": 2, "propose": 2, "act": 6, "reflect": 2},
+    ))
+    assert result.counters["phase_reflect_turns"] == 2
+    assert result.turns == 5
+
+
+def test_live_budget_prompt_reports_phase_start_state(tmp_path):
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core.adapter import EpisodeSpec
+
+    seen = {}
+
+    def policy(phase, prompt, episode, rng):
+        seen[phase] = prompt
+        return [("read_state", None, phase)]
+
+    adapter = MinimalHarness(policy=policy)
+    root = tmp_path / "live-prompt"
+    adapter.seed(root / "harness")
+    result = adapter.run_episode(EpisodeSpec(
+        root=root, episode=7, model="mock", phase_prompts={}, announce_budget=True,
+        max_turns=8, hard_max_turns=12,
+        phase_turns={"observe": 2, "propose": 2, "act": 2, "reflect": 2},
+    ))
+    assert result.ok
+    assert "episode 7, phase observe" in seen["observe"]
+    assert "calls already used before this phase: 0" in seen["observe"]
+    assert "calls already used before this phase: 2" in seen["act"]
+    assert "episode hard ceiling: 12" in seen["act"]
+    assert "act owns unused earlier-phase allowance and up to 4 burst calls" in seen["act"]
+
+
+def test_checkpoint_reserve_is_agent_authored_and_visible():
+    from proteus.core.adapter import EpisodeSpec
+    from proteus.core.budget import phase_prompt
+
+    spec = EpisodeSpec(
+        root=Path("."), episode=3, model="m", phase_prompts={"act": "do work"},
+        max_turns=12, hard_max_turns=20, checkpoint_turns=2,
+        phase_turns={"observe": 2, "propose": 2, "act": 6, "reflect": 2},
+        announce_budget=True, continuity_mode="framework",
+    )
+    prompt = phase_prompt(spec, "act", 4)
+    assert "checkpoint reserve: keep final 2 calls" in prompt
+    assert "cumulative call 16" in prompt
+    assert "/workspace/.proteus/handoff.md" in prompt
+    assert "will not invent a semantic summary" in prompt
+
+
+def test_explicit_phase_budget_stops_container_phases_at_the_same_lines(tmp_path):
+    from proteus.core.adapter import EpisodeSpec
+
+    for i, cls in enumerate((DshHarness, PiHarness)):
+        sandbox = FakeSandbox()
+        adapter = cls(key="x", sandbox=sandbox)
+        script = iter([0, 2, 2, 2, 4, 4, 4, 18, 18, 18, 20, 20])
+        adapter._live_calls = lambda *args, **kw: next(script, 20)
+        harness = tmp_path / f"explicit-container-harness-{i}"
+        _seed_with_fake_src(adapter, harness, ())
+        root = tmp_path / f"explicit-container-root-{i}"
+        root.mkdir()
+        (root / "harness").symlink_to(harness)
+        result = adapter.run_episode(EpisodeSpec(
+            root=root, episode=1, model="m", phase_prompts={},
+            max_turns=12, hard_max_turns=20, checkpoint_turns=1,
+            phase_turns={"observe": 2, "propose": 2, "act": 6, "reflect": 2},
+            announce_budget=True, continuity_mode="framework",
+        ))
+        phases = [call for call in sandbox.calls if call["command"] != ["--version"]]
+        assert len(phases) == 4, cls.__name__
+        assert result.ok and result.counters["turn_capped"], cls.__name__
+        assert result.counters["checkpoint_misses"] == 4, cls.__name__

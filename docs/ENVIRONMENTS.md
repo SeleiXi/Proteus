@@ -130,9 +130,18 @@ The episode budget and wall-clock backstop are independent:
   container at the budget line. `--min-turns-per-phase` reserves budget for later phases;
   `--announce-budget` additionally tells the agent the limit, an off-by-default
   experimental condition. Budget stops record `turn_capped` and snapshot normally.
+- For long source-evolution tasks, `--phase-turns` replaces the uniform minimum with an
+  exact normal plan, `--hard-max-turns` adds a bounded burst ceiling, and unused early
+  quota is reserved for act. `--checkpoint-turns` keeps an agent-visible tail for its own
+  persistent handoff and requires `--announce-budget`. A recommended starting point is
+  `300` normal / `500` hard with
+  `observe=40,propose=25,act=200,reflect=35` and a two-call checkpoint reserve. These are
+  experimental-condition fields and must be repeated unchanged when resuming.
 - `--phase-timeout` is wall-clock seconds per phase for containerised harnesses, where the
   external CLI owns its own loop. Reaching it ends the episode with a timeout error rather
   than hanging the sweep. Default 600.
 
 Episode cost grows with episode index — later episodes wake up to a larger harness and read
 more of it — so a cap that is comfortable at episode 1 is the one that matters at episode 30.
+The hard limit is still a ceiling, not a target: a phase may stop early when it has enough
+evidence or a complete change.
