@@ -29,7 +29,8 @@ runs/demo/
 └── runs/
     ├── .proteus-records/<run-id>/ # framework-private; outside the subject run root
     │   ├── eval_history.json      # evaluator results and accept/reject decisions
-    │   └── disposition_fingerprint.json
+    │   ├── disposition_fingerprint.json
+    │   └── pending_candidate.json # present only while a staged failure awaits repair
     └── <run-id>/
         ├── harness/               # current measured harness state
         ├── task/                  # optional benchmark; not measured/snapshotted

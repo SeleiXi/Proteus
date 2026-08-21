@@ -107,8 +107,9 @@ An installed action preference measurably shifts what the harness grows — and 
 extracts the pinned harness's real TypeScript source into `harness/src/`. During episode N,
 all four phases boot the same read-only last-valid snapshot while writing a separate
 candidate. After reflect, Proteus rebuilds and validates the candidate; only a passing
-candidate activates in episode N+1. A failed build is preserved for analysis and
-automatically rolled back, so the next episode remains healthy. The source is therefore a
+candidate activates in episode N+1. A failed build is prevented from activating, while
+its exact tree is restored as the next writable repair candidate; the next episode's
+running harness remains healthy. The source is therefore a
 measured, snapshotted `loop` surface alongside instructions, notes, tools, and skills. The
 adapters still leave the upstream repositories untouched: they arrange the run copy,
 launch one prepared container per phase, and parse the harness's own session logs.

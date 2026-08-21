@@ -50,7 +50,7 @@ The current implementation has two layers that must not be conflated:
 |---|---|---|
 | snapshot transaction and recovery | every adapter | accepted/rejected history, automatic restore after adapter or snapshot failure, strict resume from the last complete checkpoint |
 | frozen active + writable candidate | adapters declaring `staged_activation=True` | private `active_root`, isolation prompt, episode-boundary activation |
-| candidate viability | adapters implementing `validate_candidate()` | model-free gate before evaluators; failure is preserved, rejected, and rolled back |
+| candidate viability | adapters implementing `validate_candidate()` | model-free gate before evaluators; failure cannot activate, and staged adapters retain its exact tree as the next writable repair base |
 
 DSH and Pi implement all three layers. Minimal and LLM do not execute an editable copy of
 their own runtime, so they currently use the common snapshot transaction without staged
@@ -130,8 +130,10 @@ adapter's:
 
 An exception or `res.ok == False` preserves the partial candidate under
 `refs/proteus/candidates/episode-N-failed`, automatically restores files, index, and HEAD
-to the prior valid checkpoint, and ends the trajectory so resume can retry episode N. The
-attempt does **not** receive an `episode N` commit and therefore does not count as complete.
+to the prior valid checkpoint, and ends the trajectory so resume can retry episode N. For
+a staged adapter, the preserved commit is then restored only as that retry's writable
+candidate. The attempt does **not** receive an `episode N` commit and therefore does not
+count as complete.
 
 ### 4. Read the trace — adapter
 
@@ -152,8 +154,8 @@ control a model session.
   to activate in episode N+1;
 - **fail**: commit `candidate N [viability failed]`, restore the last valid state, commit
   the gapless `episode N [viability failed; rolled back]` checkpoint, record the build
-  error, and continue. Episode N+1 runs healthy code and receives the failure detail as
-  recovery feedback.
+  error, and continue. Episode N+1 runs healthy code, receives the failure detail, and
+  restores the exact failed tree into its separate writable candidate for repair.
 
 The gate runs before arbitrary evaluators, so invalid candidate code is not accidentally
 executed by benchmark or custom evaluation either. If an adapter does not implement the
@@ -195,7 +197,9 @@ A viability rejection uses the same preservation pattern with
 `candidate N [viability failed]` and
 `episode N [viability failed; rolled back]`. Unlike an infrastructure failure, it is a
 completed experimental episode: the failed evolutionary proposal is part of the
-trajectory, while its code is not allowed to control the next one.
+trajectory. Its code is not allowed to control the next one, but staged adapters reuse it
+as the next writable repair base. A valid but lower-scoring **selection** rejection does
+not carry forward; the configured outer loop deliberately rejected that candidate.
 
 Only `harness/` participates in selection. A benchmark task is the exercise rather than
 the measured subject, so `<run>/task/` moves forward and is not restored when a harness
@@ -213,10 +217,11 @@ candidate is rejected.
   `progress_path`, which **must live outside the run root**: the subject can read its
   own run root.
 
-Both evaluator history and the initial/candidate/checkpoint disposition fingerprints live
-under the sibling `.proteus-records/<run-id>/`, never inside the subject-visible run root.
-Resume requires the snapshot count, history rows, continuity checkpoint, and current
-fingerprint to agree with the last durable checkpoint.
+Evaluator history, the initial/candidate/checkpoint disposition fingerprints, and the
+temporary `pending_candidate.json` repair pointer live under the sibling
+`.proteus-records/<run-id>/`, never inside the subject-visible run root. Resume requires
+the snapshot count, history rows, continuity checkpoint, and current fingerprint to agree
+with the last durable checkpoint before it restores any pending tree on the writable side.
 
 At sweep level, `manifest.json` carries a versioned immutable `condition` record: adapter
 identity/runtime knobs, surfaces, disposition fingerprints, model, goal, evaluators, task,
@@ -226,10 +231,12 @@ manifest has no condition lock and is deliberately not resumable under v0.2.
 
 ### 10. Next episode — framework
 
-Context-fresh: the next episode materializes and boots the newly accepted snapshot. In a
-framework-continuity run, the prior reflect's bounded operational handoff also crosses the
-boundary as apparatus state; because it lives outside the harness snapshot, it cannot
-count as evolved memory. Raw conversation and process state never survive.
+Context-fresh: the next episode materializes and boots the last valid snapshot. Normally
+its writable candidate starts from the same tree; after a staged viability/infrastructure
+failure, only the writable side starts from the preserved failed commit. In a framework-
+continuity run, the prior reflect's bounded operational handoff also crosses the boundary
+as apparatus state; because it lives outside the harness snapshot, it cannot count as
+evolved memory. Raw conversation and process state never survive.
 
 ---
 
@@ -280,12 +287,12 @@ count as evolved memory. Raw conversation and process state never survive.
 
 | situation | outcome |
 |---|---|
-| a phase times out / the CLI exits nonzero | partial candidate is preserved under a dedicated ref; prior valid checkpoint is automatically restored; trajectory ends and resume retries the episode |
-| the agent breaks its own code | boundary gate preserves the failed candidate, rolls back automatically, records a rejected episode, and the next episode continues on healthy code |
+| a phase times out / the CLI exits nonzero | partial candidate is preserved under a dedicated ref; prior valid runtime is restored; resume retries the same episode with the partial tree as its writable repair candidate |
+| the agent breaks its own code | boundary gate preserves the failed candidate, keeps the next runtime on healthy code, and restores the failed tree as the next writable repair candidate |
 | one evaluator crashes or returns a non-finite score | that evaluator gets a named zero; other evaluator results survive |
 | a nested `.git` appears in the harness | the episode records a snapshot error; nested metadata is refused and automatic restore removes its contents |
 | the episode is rejected by selection | candidate tree preserved in history, working tree rolled back, mapping gapless |
-| the process is killed mid-run | no handler can run at kill time; `--on-existing resume` first hard-restores the last complete checkpoint, then retries without the dirty partial candidate |
+| the process is killed mid-run | for staged adapters, resume captures the dirty tree under a failed-attempt ref, restores the last-valid runtime, and retries with that tree as writable candidate; native adapters hard-restore the checkpoint |
 
 ## Invariants to test in every staged adapter
 
@@ -294,7 +301,9 @@ count as evolved memory. Raw conversation and process state never survive.
 3. Reflect can inspect candidate/diff but cannot reload candidate as its own harness.
 4. Validation happens once, after reflect and before arbitrary evaluators.
 5. A valid candidate first controls episode N+1, never episode N.
-6. A validation failure preserves evidence, restores the prior valid tree, and still
-   creates a gapless rejected episode checkpoint.
-7. An adapter/provider/snapshot failure restores but does not count the incomplete episode.
-8. Resume removes any crash-time dirty candidate before the next attempt.
+6. A validation failure preserves evidence, restores the prior valid active tree, creates
+   a gapless rejected checkpoint, and restores the failed tree only on the writable side.
+7. An adapter/provider failure does not count the incomplete episode; a staged retry gets
+   its preserved partial candidate while its active runtime stays at the checkpoint.
+8. Resume captures staged crash-time edits before reset and restores them as the writable
+   repair base. Native adapters, which cannot isolate active from candidate, discard them.

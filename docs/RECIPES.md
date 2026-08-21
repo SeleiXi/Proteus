@@ -94,8 +94,9 @@ For both source adapters, an unchanged source takes a pristine fast path. A chan
 is exact-synced, rebuilt once per source hash, cached under `/state`, and rejected by the
 post-reflect viability gate if it cannot boot. Every phase within an episode runs the same
 frozen snapshot; a valid candidate activates only in the next episode, while an invalid one
-is preserved and automatically rolled back. Containers run as the host uid/gid so their
-bind-mounted files remain editable on Linux.
+is blocked from activation and restored as the next episode's writable repair base. The
+running harness remains the last-valid snapshot. Containers run as the host uid/gid so
+their bind-mounted files remain editable on Linux.
 
 ## Watch, measure, audit, resume, and export
 
