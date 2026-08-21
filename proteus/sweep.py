@@ -139,6 +139,7 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
         for s in range(cfg.seeds):
             rid = opaque_id(arm.label, s)
             run_root = cfg.root / "runs" / rid
+            resume_run = run_root.exists() and cfg.on_existing == "resume"
             start = 0
             if run_root.exists():
                 if cfg.on_existing == "refuse":
@@ -167,7 +168,7 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
                 grader_sandbox=cfg.grader_sandbox,
                 progress_path=cfg.root / "progress" / f"{rid}.jsonl",
             )
-            res = run(rc, start=start)
+            res = run(rc, start=start, resume=resume_run)
             rec = {"arm": arm.label, "seed": s, "root": str(run_root),
                    "episodes_complete": res.episodes_complete, "error": res.error,
                    "counters": res.counters}
