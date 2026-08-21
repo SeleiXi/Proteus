@@ -84,6 +84,27 @@ def head(work_tree: Path) -> str:
         return ""
 
 
+def has_changes(work_tree: Path) -> bool:
+    """Whether files/index differ from HEAD, including ignored and untracked files."""
+    # Snapshot repos deliberately disable ignore rules for commits, but status still needs
+    # --ignored to expose an interrupted candidate file matched by its own .gitignore.
+    lines = _git(
+        work_tree, "status", "--porcelain", "--untracked-files=all", "--ignored=matching"
+    ).splitlines()
+    return bool(lines)
+
+
+def has_commit(work_tree: Path, sha: str) -> bool:
+    """Return whether ``sha`` names a commit in this run's private snapshot repository."""
+    if not sha:
+        return False
+    try:
+        _git(work_tree, "cat-file", "-e", f"{sha}^{{commit}}")
+    except RuntimeError:
+        return False
+    return True
+
+
 def _nested_git_metadata(work_tree: Path) -> list[Path]:
     """Every nested `.git` file/dir, without descending into repository internals."""
     found: list[Path] = []
@@ -137,6 +158,21 @@ def restore(work_tree: Path, sha: str) -> None:
     _git(work_tree, "clean", "-fdx")
 
 
+def _keep_failed_ref(work_tree: Path, candidate: str, episode: int) -> str:
+    """Give a candidate commit the next durable failed-attempt ref for an episode."""
+    base = f"refs/proteus/candidates/episode-{episode}-failed"
+    existing = set(_git(
+        work_tree, "for-each-ref", "--format=%(refname)", f"{base}*"
+    ).splitlines())
+    ref = base
+    attempt = 2
+    while ref in existing:
+        ref = f"{base}-attempt-{attempt}"
+        attempt += 1
+    _git(work_tree, "update-ref", ref, candidate)
+    return ref
+
+
 def preserve_failed_candidate(work_tree: Path, restore_sha: str, episode: int,
                               message: str) -> str:
     """Keep a failed attempt under a dedicated ref, then restore the valid checkpoint.
@@ -151,16 +187,31 @@ def preserve_failed_candidate(work_tree: Path, restore_sha: str, episode: int,
     candidate = ""
     try:
         candidate = commit(work_tree, message)
-        base = f"refs/proteus/candidates/episode-{episode}-failed"
-        existing = set(_git(
-            work_tree, "for-each-ref", "--format=%(refname)", f"{base}*"
-        ).splitlines())
-        ref = base
-        attempt = 2
-        while ref in existing:
-            ref = f"{base}-attempt-{attempt}"
-            attempt += 1
-        _git(work_tree, "update-ref", ref, candidate)
+        _keep_failed_ref(work_tree, candidate, episode)
+    finally:
+        reset_to_checkpoint(work_tree, restore_sha)
+    return candidate
+
+
+def preserve_interrupted_candidate(work_tree: Path, restore_sha: str, episode: int,
+                                   message: str) -> str:
+    """Capture crash-time staged work, including a commit made just before the crash.
+
+    During model phases HEAD remains at the durable checkpoint and edits are dirty. A
+    machine can also die in the tiny boundary window after candidate commit but before
+    rollback, where HEAD already names the candidate and status is clean. Both cases are
+    retained under the normal failed-attempt refs, then the worktree and HEAD are reset.
+    """
+    candidate = ""
+    try:
+        current = head(work_tree)
+        dirty = has_changes(work_tree)
+        if dirty:
+            candidate = commit(work_tree, message)
+        elif current and current != restore_sha:
+            candidate = current
+        if candidate:
+            _keep_failed_ref(work_tree, candidate, episode)
     finally:
         reset_to_checkpoint(work_tree, restore_sha)
     return candidate

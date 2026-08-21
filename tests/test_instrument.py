@@ -106,7 +106,7 @@ def test_snapshot_failure_becomes_a_seed_error(tmp_path):
 def test_staged_candidate_is_frozen_until_next_episode_and_bad_build_rolls_back(tmp_path):
     from proteus.adapters.minimal import MinimalHarness
     from proteus.core import EpisodeResult, EvaluatorSpec, GoalConfig, NEUTRAL
-    from proteus.core.episode import RunConfig, run
+    from proteus.core.episode import RunConfig, pending_candidate_path, run
     from proteus.core.goal import EvalResult
 
     class StagedHarness(MinimalHarness):
@@ -122,6 +122,7 @@ def test_staged_candidate_is_frozen_until_next_episode_and_bad_build_rolls_back(
             self.active_observations.append({
                 "episode": spec.episode,
                 "broken_before": (active / "BROKEN").exists(),
+                "candidate_broken_before": (candidate / "BROKEN").exists(),
             })
             if spec.episode == 1:
                 (candidate / "BROKEN").write_text("does not compile\n")
@@ -129,6 +130,9 @@ def test_staged_candidate_is_frozen_until_next_episode_and_bad_build_rolls_back(
                 self.active_observations[-1]["broken_after_act"] = (
                     active / "BROKEN").exists()
             else:
+                assert (candidate / "BROKEN").read_text() == "does not compile\n", \
+                    "the failed candidate was not restored as the next repair base"
+                (candidate / "BROKEN").unlink()
                 (candidate / "notes").mkdir(exist_ok=True)
                 (candidate / "notes" / "recovered.md").write_text("healthy\n")
             return EpisodeResult(episode=spec.episode, ok=True)
@@ -152,16 +156,20 @@ def test_staged_candidate_is_frozen_until_next_episode_and_bad_build_rolls_back(
 
     assert result.episodes_complete == 2 and not result.error
     assert adapter.active_observations == [
-        {"episode": 1, "broken_before": False, "broken_after_act": False},
-        {"episode": 2, "broken_before": False},
+        {"episode": 1, "broken_before": False, "candidate_broken_before": False,
+         "broken_after_act": False},
+        {"episode": 2, "broken_before": False, "candidate_broken_before": True},
     ]
     assert not result.eval_history[0]["accepted"]
     assert result.eval_history[0]["failure_kind"] == "viability"
     assert "compile failed" in result.eval_history[0]["error"]
+    assert result.eval_history[0]["candidate_commit"]
     assert result.eval_history[1]["accepted"]
     assert evaluated == [2], "an invalid candidate reached arbitrary evaluator code"
     assert not (root / "harness" / "BROKEN").exists()
     assert (root / "harness" / "notes" / "recovered.md").exists()
+    assert not pending_candidate_path(root).exists(), \
+        "an accepted repair left a stale pending-candidate pointer"
     assert not (root / ".proteus-state" / "active").exists(), \
         "the frozen runtime leaked into the writable handoff mount"
 
@@ -203,6 +211,178 @@ def test_incomplete_episode_preserves_candidate_ref_and_restores_checkpoint(tmp_
         capture_output=True, text=True, check=True,
     ).stdout
     assert preserved == "keep for analysis\n"
+
+
+def test_staged_incomplete_candidate_is_restored_on_same_episode_retry(tmp_path):
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core import EpisodeResult, GoalConfig, NEUTRAL
+    from proteus.core.episode import RunConfig, pending_candidate_path, run
+
+    class RetryHarness(MinimalHarness):
+        staged_activation = True
+
+        def __init__(self):
+            super().__init__()
+            self.attempt = 0
+            self.observations = []
+
+        def run_episode(self, spec):
+            active = Path(spec.active_root)
+            candidate = spec.root / "harness"
+            self.observations.append({
+                "episode": spec.episode,
+                "active_partial": (active / "PARTIAL.md").exists(),
+                "candidate_partial": (candidate / "PARTIAL.md").exists(),
+            })
+            self.attempt += 1
+            if self.attempt == 1:
+                (candidate / "PARTIAL.md").write_text("continue me\n")
+                return EpisodeResult(spec.episode, ok=False, error="provider unavailable")
+            assert (candidate / "PARTIAL.md").read_text() == "continue me\n"
+            (candidate / "PARTIAL.md").write_text("finished\n")
+            return EpisodeResult(spec.episode, ok=True)
+
+    adapter = RetryHarness()
+    root = tmp_path / "retry-run"
+    cfg = RunConfig(
+        name="retry", adapter=adapter, disposition=NEUTRAL, goal=GoalConfig(),
+        root=root, model="mock", episodes=1,
+    )
+    first = run(cfg)
+    assert first.episodes_complete == 0 and first.error == "provider unavailable"
+    assert pending_candidate_path(root).exists()
+
+    second = run(cfg, start=0, resume=True)
+    assert second.episodes_complete == 1 and not second.error
+    assert adapter.observations == [
+        {"episode": 1, "active_partial": False, "candidate_partial": False},
+        {"episode": 1, "active_partial": False, "candidate_partial": True},
+    ]
+    assert (root / "harness" / "PARTIAL.md").read_text() == "finished\n"
+    assert not pending_candidate_path(root).exists()
+
+
+def test_failed_repair_keeps_completed_rollback_checkpoint_and_candidate(tmp_path):
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core import EpisodeResult, GoalConfig, NEUTRAL
+    from proteus.core.episode import RunConfig, completed_episodes, run
+
+    class RetryAfterRollbackHarness(MinimalHarness):
+        staged_activation = True
+
+        def __init__(self):
+            super().__init__()
+            self.episode_two_attempts = 0
+
+        def run_episode(self, spec):
+            active = Path(spec.active_root)
+            candidate = spec.root / "harness"
+            assert not (active / "BROKEN").exists()
+            if spec.episode == 1:
+                (candidate / "BROKEN").write_text("bad build\n")
+            else:
+                self.episode_two_attempts += 1
+                if self.episode_two_attempts == 1:
+                    assert (candidate / "BROKEN").read_text() == "bad build\n"
+                    (candidate / "PARTIAL_FIX").write_text("keep this repair\n")
+                    return EpisodeResult(
+                        spec.episode, ok=False, error="provider unavailable"
+                    )
+                assert (candidate / "PARTIAL_FIX").read_text() == "keep this repair\n"
+                (candidate / "BROKEN").unlink()
+                (candidate / "FIXED").write_text("yes\n")
+            return EpisodeResult(spec.episode, ok=True)
+
+        def validate_candidate(self, harness_root):
+            return "compile failed" if (Path(harness_root) / "BROKEN").exists() else ""
+
+    adapter = RetryAfterRollbackHarness()
+    root = tmp_path / "retry-after-rollback"
+    cfg = RunConfig(
+        name="repair", adapter=adapter, disposition=NEUTRAL, goal=GoalConfig(),
+        root=root, model="mock", episodes=2,
+    )
+    first = run(cfg)
+    harness = root / "harness"
+
+    assert first.episodes_complete == 1 and first.error == "provider unavailable"
+    assert completed_episodes(cfg) == 1
+    assert snapshot.head(harness) == snapshot.commit_for_episode(harness, 1)
+
+    second = run(cfg, start=1, resume=True)
+    assert second.episodes_complete == 2 and not second.error
+    assert (harness / "FIXED").read_text() == "yes\n"
+
+
+def test_staged_viability_candidate_survives_process_resume(tmp_path):
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core import EpisodeResult, GoalConfig, NEUTRAL
+    from proteus.core.episode import RunConfig, pending_candidate_path, run
+
+    class RepairHarness(MinimalHarness):
+        staged_activation = True
+
+        def run_episode(self, spec):
+            active = Path(spec.active_root)
+            candidate = spec.root / "harness"
+            assert not (active / "BROKEN").exists()
+            if spec.episode == 1:
+                (candidate / "BROKEN").write_text("bad build\n")
+            else:
+                assert (candidate / "BROKEN").read_text() == "bad build\n"
+                (candidate / "BROKEN").unlink()
+                (candidate / "FIXED").write_text("yes\n")
+            return EpisodeResult(spec.episode, ok=True)
+
+        def validate_candidate(self, harness_root):
+            return "compile failed" if (Path(harness_root) / "BROKEN").exists() else ""
+
+    adapter = RepairHarness()
+    root = tmp_path / "viability-resume"
+    cfg = RunConfig(
+        name="repair", adapter=adapter, disposition=NEUTRAL, goal=GoalConfig(),
+        root=root, model="mock", episodes=1,
+    )
+    first = run(cfg)
+    assert first.episodes_complete == 1 and not first.eval_history[0]["accepted"]
+    assert pending_candidate_path(root).exists()
+
+    cfg.episodes = 2
+    second = run(cfg, start=1, resume=True)
+    assert second.episodes_complete == 2 and second.eval_history[-1]["accepted"]
+    assert (root / "harness" / "FIXED").read_text() == "yes\n"
+    assert not pending_candidate_path(root).exists()
+
+
+def test_staged_sigkill_candidate_is_captured_before_episode_zero_reset(tmp_path):
+    from proteus.adapters.minimal import MinimalHarness
+    from proteus.core import EpisodeResult, GoalConfig, NEUTRAL
+    from proteus.core.episode import RunConfig, run
+
+    class CrashRecoveryHarness(MinimalHarness):
+        staged_activation = True
+
+        def run_episode(self, spec):
+            active = Path(spec.active_root)
+            candidate = spec.root / "harness"
+            assert not (active / "CRASH_PARTIAL.md").exists()
+            assert (candidate / "CRASH_PARTIAL.md").read_text() == "half written\n"
+            (candidate / "CRASH_PARTIAL.md").write_text("recovered\n")
+            return EpisodeResult(spec.episode, ok=True)
+
+    adapter = CrashRecoveryHarness()
+    root = tmp_path / "sigkill-staged"
+    cfg = RunConfig(
+        name="sigkill", adapter=adapter, disposition=NEUTRAL, goal=GoalConfig(),
+        root=root, model="mock", episodes=0,
+    )
+    assert run(cfg).episodes_complete == 0
+    (root / "harness" / "CRASH_PARTIAL.md").write_text("half written\n")
+
+    cfg.episodes = 1
+    resumed = run(cfg, start=0, resume=True)
+    assert resumed.episodes_complete == 1 and not resumed.error
+    assert (root / "harness" / "CRASH_PARTIAL.md").read_text() == "recovered\n"
 
 
 def test_retried_incomplete_episode_keeps_each_failed_candidate(tmp_path):
