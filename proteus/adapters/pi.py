@@ -55,7 +55,8 @@ candidate surfaces are:
 - `/workspace/candidate/skills/` — pi skill files, loaded after activation
 - `/workspace/candidate/src/` — your own program: the real TypeScript source of the
   agent that runs you. Proteus validates it only after reflect. A valid candidate is
-  activated in the next episode; an invalid one is preserved for analysis and rolled back.
+  activated in the next episode. An invalid one cannot run, but its exact tree becomes the
+  next episode's writable candidate so you can repair it instead of starting over.
 
 Proteus supplies the cross-phase operational handoff at
 `/workspace/.proteus/handoff.md`. Read and replace it as requested by each phase prompt. It is

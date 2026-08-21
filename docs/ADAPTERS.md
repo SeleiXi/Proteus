@@ -249,9 +249,10 @@ natively —
    edits are versioned per episode and measured with the same ruler as notes and tools.
 4. After reflect, `validate_candidate()` runs `--version` through the candidate boot path —
    the **model-free viability gate**. For pi that includes the rebuild, so a type error the
-   agent wrote surfaces with the build log tail. A failed candidate is preserved and
-   rolled back; the next episode remains healthy. A passing candidate first runs as the
-   controlling harness in episode N+1.
+   agent wrote surfaces with the build log tail. A failed candidate cannot activate: the
+   active line rolls back and remains healthy, while the exact failed tree is restored as
+   episode N+1's writable repair candidate. A passing candidate first runs as the
+   controlling harness one episode later.
 
 Verified live for both harnesses: a marker written into the real TypeScript entry point
 (`packages/coding-agent/src/cli.ts` for pi, `apps/cli/src/bin.ts` for dsh) appears on the
