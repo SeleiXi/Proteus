@@ -216,6 +216,10 @@ proteus run   --harness mypkg.theirs_adapter:TheirsHarness --arm neutral ...
 
 `proteus check` machine-verifies the contract (removable disposition via fingerprint
 round-trip, snapshot-ability, trace shape). The full guide: [docs/ADAPTERS.md](docs/ADAPTERS.md).
+To start from a working skeleton instead of a blank file,
+`python -m proteus.scaffold adapter MyHarness` copies the fully-commented
+[examples/adapter_template.py](examples/adapter_template.py) — see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## 📦 Prepared environments
 
@@ -279,6 +283,31 @@ pinned upstream versions, while the weekly upstream canary is advisory. As a
 cross-implementation check, Proteus's
 behavioural ruler applied to the research runs independently reproduces their headline
 dynamics: arms separate at episode 1 (R = 1.63) and converge by episode 30 (R = 0.93).
+
+## 🤝 Contributing
+
+The two highest-value contributions are **a new harness adapter** (evolve another agent
+framework) and **a new benchmark** (measure under more goals). Both are single-file,
+contract-checked, CI-gated additions:
+
+```bash
+python -m proteus.scaffold adapter MyHarness    # skeleton -> proteus/adapters/myharness.py
+python -m proteus.scaffold benchmark my_task    # skeleton -> proteus/bench/my_task.py
+proteus check --harness proteus.adapters.myharness:MyHarness --episode
+```
+
+The step-by-step guide (contract, templates, the conformance gate in
+`tests/test_conformance.py`, PR expectations) is [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Where help is wanted, in one line each — the full list with difficulty tags is
+[ROADMAP.md](ROADMAP.md):
+
+- **More harnesses** — Hermes Agent first (Python, built-in self-improvement surfaces),
+  then SWE-agent, OpenClaw, Codex CLI, OpenHands, OpenCode, Goose.
+- **More benchmarks** — lightweight offline packs (HumanEval, MBPP, BigCodeBench-lite),
+  SWE-bench Lite/Verified wiring, and finishing sandboxed grading for `swe`.
+- **Analysis** — `proteus compare` for side-by-side arms/runs; an episode-atlas view.
+- **Reproducibility & cost** — per-episode token/cost accounting; one-command reproduce.
 
 ## 📖 Citation
 
