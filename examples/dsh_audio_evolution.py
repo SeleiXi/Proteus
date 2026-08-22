@@ -3,7 +3,7 @@
 Build the pinned rc.8 source image first (docs/DSH_AUDIO_EVOLUTION.md), export a DeepSeek
 API key, then run:
 
-    python examples/dsh_audio_evolution.py --out runs/dsh-audio-30ep-phase-budget-v2
+    python examples/dsh_audio_evolution.py --out runs/dsh-audio-self-evaluation-v3
 
 The equivalent CLI is printed by ``--dry-run``.  The Python entry point exists so the
 campaign's exact goal and benchmark stay versioned rather than copied from a shell history.
@@ -21,10 +21,25 @@ from pathlib import Path
 
 from proteus import __version__
 from proteus.adapters.dsh import DshHarness
-from proteus.bench.dsh_audio import GOAL_TEXT, NAME, evaluate_audio_capability
-from proteus.core import EvaluatorSpec, GoalConfig, NEUTRAL, Visibility
+from proteus.bench.dsh_audio import (
+    EVALUATOR_SUFFICIENCY_PROTOCOL,
+    GOAL_TEXT,
+    NAME,
+    evaluate_audio_capability,
+)
+from proteus.core import Disposition, EvaluatorSpec, GoalConfig, Visibility
 from proteus.report import write_report
 from proteus.sweep import SweepConfig, run_sweep
+
+
+# This is a campaign condition, not an audio-specific rubric extension. DSH decides
+# whether the supplied evaluator is sufficient and whether evolving its own tests or
+# evaluators would reduce uncertainty. The opaque label keeps the subject's run path from
+# spelling the manipulation; the manifest fingerprints the exact text.
+EPISTEMIC_CONDITION = Disposition(
+    label="e1",
+    prompt_suffix=EVALUATOR_SUFFICIENCY_PROTOCOL,
+)
 
 
 def _write_live_state(root: Path, status: str) -> None:
@@ -68,7 +83,7 @@ def _start_publisher(args: argparse.Namespace, root: Path) -> subprocess.Popen:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", default="runs/dsh-audio-30ep-phase-budget-v2")
+    parser.add_argument("--out", default="runs/dsh-audio-self-evaluation-v3")
     parser.add_argument("--episodes", type=int, default=30)
     parser.add_argument("--max-turns", type=int, default=300)
     parser.add_argument("--hard-max-turns", type=int, default=500)
@@ -123,12 +138,12 @@ def main() -> None:
     )
     root = Path(args.out).expanduser().resolve()
     cfg = SweepConfig(
-        name="dsh-rc8-audio-modality-phase-budget-v2",
+        name="dsh-rc8-audio-modality-self-evaluation-v3",
         adapter_factory=lambda: DshHarness(
             image=args.image, permission_mode=args.dsh_permission_mode,
             phase_timeout_s=args.phase_timeout,
         ),
-        arms=(NEUTRAL,),
+        arms=(EPISTEMIC_CONDITION,),
         seeds=1,
         goal=GoalConfig.of(text=GOAL_TEXT, evaluators=(benchmark,)),
         root=root,

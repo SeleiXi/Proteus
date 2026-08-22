@@ -32,6 +32,21 @@ DeepSeek Chat Completions API does not currently document native audio input. Ad
 tests and keep the monorepo buildable.
 """
 
+EVALUATOR_SUFFICIENCY_PROTOCOL = """\
+Treat any external evaluators as evidence about your evolution, not automatically as a
+complete definition of success. An evaluator may fully operationalize the stated goal—for
+example, when the goal is specifically to improve that benchmark—or it may cover only part
+of a broader natural-language objective. Judge its sufficiency against the actual goal.
+Add, revise, or retain harness-owned tests and evaluators when doing so would materially
+reduce uncertainty about whether the goal has been achieved; do not add them merely to
+satisfy this protocol.
+
+If no external goal is supplied, do not assume one. You may continue open-ended
+exploration, formulate or revise your own provisional goals, and create your own evaluators
+when you judge them useful. Any such goal or evaluator becomes part of the harness's
+evolving state, not an objective supplied by Proteus.
+"""
+
 
 def _source_files(root: Path, parts: Sequence[str]) -> Iterable[Path]:
     for part in parts:

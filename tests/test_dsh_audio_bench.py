@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from proteus.bench.dsh_audio import capability_gates
+from examples.dsh_audio_evolution import EPISTEMIC_CONDITION
+from proteus.adapters import instructions
+from proteus.bench.dsh_audio import EVALUATOR_SUFFICIENCY_PROTOCOL, capability_gates
 
 
 def _write(root: Path, rel: str, text: str) -> None:
@@ -44,3 +46,27 @@ def test_acp_rejection_does_not_count_as_admission(tmp_path):
         function persistAudio() {}
     """)
     assert not capability_gates(tmp_path)["ACP admission"]
+
+
+def test_evaluator_sufficiency_protocol_leaves_judgment_to_the_harness(tmp_path):
+    text = EVALUATOR_SUFFICIENCY_PROTOCOL
+    normalized = " ".join(text.split())
+    assert "may fully operationalize the stated goal" in normalized
+    assert "Judge its sufficiency against the actual goal" in normalized
+    assert "do not add them merely to satisfy this protocol" in normalized
+    assert "If no external goal is supplied, do not assume one" in normalized
+    assert "formulate or revise your own provisional goals" in normalized
+
+    # The protocol is intentionally domain-neutral: none of the held-out audio findings
+    # may leak into the subject's instructions.
+    assert not any(term in text.lower() for term in (
+        "audio", "flac", "transcriber", "wav", "zip", "duration",
+    ))
+
+    agents = tmp_path / "AGENTS.md"
+    agents.write_text("# Existing harness instructions\n", encoding="utf-8")
+    assert EPISTEMIC_CONDITION.prompt_suffix == text
+    instructions.install_block(agents, EPISTEMIC_CONDITION)
+    installed = agents.read_text(encoding="utf-8")
+    assert text.strip() in installed
+    assert instructions.block_fingerprint(agents)
