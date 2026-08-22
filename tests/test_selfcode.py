@@ -15,17 +15,30 @@ from proteus.adapters.dsh import DshHarness
 from proteus.adapters.pi import PiHarness
 
 
+GATE_COMMANDS = {("--version",), ("--proteus-headless-smoke",)}
+
+
+def _is_gate(call):
+    return tuple(call["command"]) in GATE_COMMANDS
+
+
 class FakeSandbox:
-    def __init__(self, boot_rc=0):
+    def __init__(self, boot_rc=0, cold_rc=0):
         self.boot_rc = boot_rc
+        self.cold_rc = cold_rc
         self.calls = []
 
     def run(self, run_root, command, env, timeout_s, mounts=(), stop_check=None):
         self.calls.append({"command": command, "mounts": mounts,
                            "stop_check": stop_check, "env": env})
-        if command != ["--version"] and stop_check is not None and stop_check():
+        if tuple(command) not in GATE_COMMANDS and stop_check is not None and stop_check():
             return subprocess.CompletedProcess(command, 137, "", "killed")
-        rc = self.boot_rc if command == ["--version"] else 0
+        if command == ["--version"]:
+            rc = self.boot_rc
+        elif command == ["--proteus-headless-smoke"]:
+            rc = self.cold_rc
+        else:
+            rc = 0
         return subprocess.CompletedProcess(command, rc, "ok", "boom" if rc else "")
 
 
@@ -115,10 +128,14 @@ def test_source_mode_gates_through_the_boot_contract(tmp_path):
         root.mkdir(exist_ok=True)
         (root / "harness").symlink_to(h)
         a.run_episode(EpisodeSpec(root=root, episode=1, model="m", phase_prompts={}))
-        gate = sandbox.calls[0]
-        assert gate["command"] == ["--version"], cls.__name__
-        conts = {cont for _, cont in gate["mounts"]}
-        assert conts == {"/workspace", "/state"},             f"{cls.__name__}: the gate must run exactly the boot contract"
+        gates = [call for call in sandbox.calls if _is_gate(call)]
+        expected = (["--version"], ["--proteus-headless-smoke"]) \
+            if cls is DshHarness else (["--version"],)
+        assert [call["command"] for call in gates] == list(expected), cls.__name__
+        for gate in gates:
+            conts = {cont for _, cont in gate["mounts"]}
+            assert conts == {"/workspace", "/state"}, \
+                f"{cls.__name__}: the gate must run exactly the boot contract"
 
 
 def test_broken_self_code_fails_the_episode_legibly(tmp_path):
@@ -135,6 +152,19 @@ def test_broken_self_code_fails_the_episode_legibly(tmp_path):
         assert not res.ok and "does not boot" in res.error, cls.__name__
         # the gate ran once and no phase was attempted after it
         assert [c["command"] for c in sandbox.calls] == [["--version"]], cls.__name__
+
+
+def test_dsh_headless_cold_start_failure_is_a_viability_error(tmp_path):
+    sandbox = FakeSandbox(cold_rc=98)
+    adapter = DshHarness(key="x", sandbox=sandbox)
+    harness = tmp_path / "harness"
+    _seed_with_fake_src(adapter, harness, ("packages",))
+
+    error = adapter.check_boot(harness)
+
+    assert "fails headless cold start" in error
+    assert [call["command"] for call in sandbox.calls] == [
+        ["--version"], ["--proteus-headless-smoke"]]
 
 
 def test_dsh_permission_mode_reaches_every_phase(tmp_path):
@@ -156,7 +186,7 @@ def test_dsh_permission_mode_reaches_every_phase(tmp_path):
         phase_prompts={phase: phase for phase in ("observe", "propose", "act", "reflect")},
     ))
 
-    phase_calls = [call for call in sandbox.calls if call["command"] != ["--version"]]
+    phase_calls = [call for call in sandbox.calls if not _is_gate(call)]
     assert len(phase_calls) == 4
     assert all(call["env"]["DSH_PERMISSION_MODE"] == "danger-full-access"
                for call in phase_calls)
@@ -175,7 +205,7 @@ def test_framework_handoff_mount_is_writable_but_snapshot_external(tmp_path):
         (root / "harness").symlink_to(harness)
         adapter.run_episode(EpisodeSpec(root=root, episode=1, model="m", phase_prompts={}))
 
-        phase = next(call for call in sandbox.calls if call["command"] != ["--version"])
+        phase = next(call for call in sandbox.calls if not _is_gate(call))
         mounts = dict(phase["mounts"])
         assert mounts[str(root / ".proteus-state")] == "/workspace/.proteus"
         assert not str(root / ".proteus-state").startswith(str(harness))
@@ -198,9 +228,9 @@ def test_staged_episode_mounts_frozen_active_read_only_and_candidate_writable(tm
             root=root, episode=1, model="m", phase_prompts={}, active_root=active,
         ))
 
-        phase_calls = [call for call in sandbox.calls if call["command"] != ["--version"]]
+        phase_calls = [call for call in sandbox.calls if not _is_gate(call)]
         assert len(phase_calls) == 4
-        assert not [call for call in sandbox.calls if call["command"] == ["--version"]], \
+        assert not [call for call in sandbox.calls if _is_gate(call)], \
             "a staged episode must not preflight the writable candidate before its phases"
         assert (active / "candidate").is_dir()
         assert (active / ".proteus").is_dir()
@@ -282,6 +312,62 @@ def test_source_hash_frames_file_boundaries_and_symlinks(tmp_path):
         assert digest(script, left) != before, f"{script}: symlink target was not hashed"
 
 
+def test_dsh_boot_contract_relinks_dependencies_and_caches_new_packages():
+    script = Path("environments/dsh-src/boot.sh").read_text()
+    dockerfile = Path("environments/dsh-src/Dockerfile").read_text()
+
+    assert "pnpm install --offline --frozen-lockfile" in script
+    assert "--config.trust-lockfile=true" in script
+    assert '--store-dir "$PNPM_STORE"' in script
+    assert 'DEP_HASH=$(tree_hash /workspace/src dependencies)' in script
+    assert "pristine-dependency-hash" in script
+    assert "COREPACK_ENABLE_NETWORK=0" in script
+    assert "find $DISTS" not in script
+    assert "find apps packages vendor" in script
+    assert "Native launcher artifacts are baked" in script
+    assert "-path '*/lib/*'" in script
+    assert 'CACHE_TMP="/state/.dist-$HASH.$$.tar"' in script
+    assert '"--proteus-headless-smoke"' in script
+    assert "MISSING_CREDENTIAL" in script
+    assert "pnpm install --frozen-lockfile --store-dir /opt/pnpm-store" in dockerfile
+    assert "COREPACK_HOME=/opt/corepack" in dockerfile
+    assert "COREPACK_ENABLE_NETWORK=0" in dockerfile
+    assert "--proteus-dependency-hash" in dockerfile
+    assert "chmod -R a+rwX /opt/src /opt/corepack /opt/pnpm-store" in dockerfile
+
+
+def test_dsh_dependency_hash_ignores_code_but_tracks_package_inputs(tmp_path):
+    script = Path("environments/dsh-src/boot.sh")
+    source = tmp_path / "source"
+    package = source / "packages" / "audio"
+    patches = source / "patches"
+    package.mkdir(parents=True)
+    patches.mkdir()
+    (source / "package.json").write_text('{"packageManager":"pnpm@11.7.0"}')
+    (source / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n")
+    (source / "pnpm-workspace.yaml").write_text("packages: ['packages/*']\n")
+    (package / "package.json").write_text('{"name":"audio"}')
+    code = package / "index.ts"
+    code.write_text("export const version = 1;\n")
+    patch = patches / "dependency.patch"
+    patch.write_text("first\n")
+
+    def digest():
+        return subprocess.run(
+            ["sh", str(script), "--proteus-dependency-hash", str(source)],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+    baseline = digest()
+    code.write_text("export const version = 2;\n")
+    assert digest() == baseline
+    (package / "package.json").write_text('{"name":"audio","dependencies":{"x":"1"}}')
+    package_changed = digest()
+    assert package_changed != baseline
+    patch.write_text("second\n")
+    assert digest() != package_changed
+
+
 # ------------------------------------------------------------------- turn budget
 
 def test_explicit_budget_validation_is_strict():
@@ -318,7 +404,7 @@ def test_budget_stops_new_phases_exactly(tmp_path):
                                         phase_prompts={}, max_turns=10))
         assert res.ok and not res.error, cls.__name__
         assert res.counters["turn_capped"], cls.__name__
-        phases = [c for c in sandbox.calls if c["command"] != ["--version"]]
+        phases = [c for c in sandbox.calls if not _is_gate(c)]
         assert phases == [], f"{cls.__name__}: a phase ran past the budget"
 
 
@@ -339,7 +425,7 @@ def test_budget_kill_mid_phase_is_a_cap_not_an_error(tmp_path):
         assert res.ok and not res.error, \
             f"{cls.__name__}: a budget kill must be a cap, got error={res.error!r}"
         assert res.counters["turn_capped"], cls.__name__
-        phases = [c for c in sandbox.calls if c["command"] != ["--version"]]
+        phases = [c for c in sandbox.calls if not _is_gate(c)]
         assert len(phases) == 1, f"{cls.__name__}: phases continued after the kill"
 
 
@@ -354,7 +440,7 @@ def test_no_budget_means_no_watching(tmp_path):
     (root / "harness").symlink_to(h)
     a.run_episode(EpisodeSpec(root=root, episode=1, model="m", phase_prompts={},
                               max_turns=0))
-    phases = [c for c in sandbox.calls if c["command"] != ["--version"]]
+    phases = [c for c in sandbox.calls if not _is_gate(c)]
     assert phases and all(c["stop_check"] is None for c in phases)
 
 
@@ -449,7 +535,7 @@ def test_reservation_stop_is_not_an_episode_end_for_containers(tmp_path):
         (root / "harness").symlink_to(h)
         res = a.run_episode(EpisodeSpec(root=root, episode=1, model="m", phase_prompts={},
                                         max_turns=8, min_turns_per_phase=2))
-        phases = [c for c in sandbox.calls if c["command"] != ["--version"]]
+        phases = [c for c in sandbox.calls if not _is_gate(c)]
         assert len(phases) == 4, \
             f"{cls.__name__}: reservation stop ended the episode after {len(phases)} phases"
         assert res.ok and res.counters["turn_capped"], cls.__name__
@@ -575,7 +661,7 @@ def test_explicit_phase_budget_stops_container_phases_at_the_same_lines(tmp_path
             phase_turns={"observe": 2, "propose": 2, "act": 6, "reflect": 2},
             announce_budget=True, continuity_mode="framework",
         ))
-        phases = [call for call in sandbox.calls if call["command"] != ["--version"]]
+        phases = [call for call in sandbox.calls if not _is_gate(call)]
         assert len(phases) == 4, cls.__name__
         assert result.ok and result.counters["turn_capped"], cls.__name__
         assert result.counters["checkpoint_misses"] == 4, cls.__name__

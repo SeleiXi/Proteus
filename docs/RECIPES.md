@@ -92,11 +92,14 @@ proteus run --harness dsh \
 
 For both source adapters, an unchanged source takes a pristine fast path. A changed source
 is exact-synced, rebuilt once per source hash, cached under `/state`, and rejected by the
-post-reflect viability gate if it cannot boot. Every phase within an episode runs the same
-frozen snapshot; a valid candidate activates only in the next episode, while an invalid one
-is blocked from activation and restored as the next episode's writable repair base. The
-running harness remains the last-valid snapshot. Containers run as the host uid/gid so
-their bind-mounted files remain editable on Linux.
+post-reflect viability gate if it cannot boot. DSH additionally checks the frozen lockfile
+against the image's offline pnpm store, dynamically includes new workspace-package outputs
+in that cache, and repeats startup in a fresh container using the real headless profile.
+Every phase within an episode runs the same frozen snapshot; a valid candidate activates
+only in the next episode, while an invalid one is blocked from activation and restored as
+the next episode's writable repair base. The running harness remains the last-valid
+snapshot. Containers run as the host uid/gid so their bind-mounted files remain editable
+on Linux.
 
 ### Long-form source evolution budget
 

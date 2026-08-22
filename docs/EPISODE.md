@@ -190,9 +190,15 @@ instrumenting the harness. Path→surface attribution is the adapter's mapping
 ### 5. Boundary viability gate — framework + adapter
 
 After reflect, and only then, Proteus calls the optional model-free
-`validate_candidate(harness_root)`. DSH and Pi exact-sync the candidate through their
-normal image boot path, rebuild it, and run `--version`. The candidate still does not
-control a model session.
+`validate_candidate(harness_root)`. Pi exact-syncs the candidate through its normal image
+boot path, rebuilds it, and runs `--version`. DSH first recreates workspace links with a
+frozen offline dependency install when its dependency-input hash changed, rebuilds and
+dynamically caches every discovered package `lib/`, then runs `--version`. It next opens a
+**second, fresh container** and boots the exact headless profile from that cache with an
+isolated home and no provider credential.
+Reaching the deterministic missing-credential boundary proves the plugin graph loaded; a
+missing package, stale lockfile, uncached dependency, or headless startup error rejects the
+candidate. The candidate never controls a model session during either probe.
 
 - **pass**: the candidate may proceed to evaluators and selection, then becomes eligible
   to activate in episode N+1;
@@ -312,7 +318,7 @@ evolved memory. Raw conversation and process state never survive.
 | `run_episode()` | how the four phases execute | in-process / one container per phase / delegated |
 | `read_trace()` | each harness's log format → `ActionEvent`s | JSONL / zstd JSONL / session events |
 | `required_edit_tools()` | evidence the harness can still edit itself | write / write+edit |
-| `validate_candidate()` | optional model-free boundary viability gate | dsh/pi: rebuild + `--version` |
+| `validate_candidate()` | optional model-free boundary viability gate | pi: rebuild + `--version`; dsh: frozen offline dependency check + rebuild, then fresh-container headless cold start |
 | `disposition_in_files` | skip the prompt channel (double-dose guard) | True for dsh/pi |
 | the self-code arrangement | how the harness's own code becomes an evolvable surface | aki: `sys.path`-first copy; dsh/pi: run-local real source rebuilt at boot |
 

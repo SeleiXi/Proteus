@@ -267,24 +267,28 @@ natively —
    is exactly the tracked source of the build it boots). The image's entrypoint syncs
    the agent's copy over the baked tree at boot, rebuilds with the project's own
    toolchain when the source hash changes (outputs cached on `/state`; an untouched copy
-   boots via a pristine-hash fast path), and execs the built CLI. Dependencies stay in
-   the image: they are apparatus, like the interpreter.
+   boots via a pristine-hash fast path), and execs the built CLI. External dependency
+   bytes stay in the image as apparatus. DSH may evolve package manifests and workspace
+   packages only when its frozen lockfile remains consistent and every required external
+   package is already present in the image's offline pnpm store.
 2. At episode N, every phase mounts the same last-valid snapshot read-only at `/workspace`.
    The writable `harness/` candidate is a separate `/workspace/candidate` mount. The boot
    wrapper syncs only active `/workspace/src`, so an act edit cannot control reflect. The
    agent may inspect its candidate, but activation waits for episode N+1.
 3. `src/` is a declared surface (`loop`, `is_code=True`), inside the snapshot repo — code
    edits are versioned per episode and measured with the same ruler as notes and tools.
-4. After reflect, `validate_candidate()` runs `--version` through the candidate boot path —
-   the **model-free viability gate**. For pi that includes the rebuild, so a type error the
-   agent wrote surfaces with the build log tail. A failed candidate cannot activate: the
-   active line rolls back and remains healthy, while the exact failed tree is restored as
-   episode N+1's writable repair candidate. A passing candidate first runs as the
-   controlling harness one episode later.
+4. After reflect, `validate_candidate()` runs the **model-free viability gate**. Pi rebuilds
+   and probes `--version`. DSH performs a frozen offline dependency relink and rebuild in
+   one container, then starts the exact headless profile from the saved cache in a second,
+   fresh container. This catches stale lockfiles, missing package links, newly added package
+   outputs omitted from a cache, and plugin-load failures before activation. A failed
+   candidate cannot activate: the active line rolls back and remains healthy, while the
+   exact failed tree is restored as episode N+1's writable repair candidate. A passing
+   candidate first runs as the controlling harness one episode later.
 
 Verified live for both harnesses: a marker written into the real TypeScript entry point
 (`packages/coding-agent/src/cli.ts` for pi, `apps/cli/src/bin.ts` for dsh) appears on the
-next boot after the automatic in-container rebuild; the second boot hits the dist cache;
+next boot after the automatic in-container rebuild; a later boot hits the dist cache;
 and a planted TS type error is refused by the gate (exit 97 with the build log tail) and
 automatically restored to the prior valid snapshot. The Docker image itself is baked once per harness version
 and never rebuilt during a run — per episode, an unchanged source boots via the fast

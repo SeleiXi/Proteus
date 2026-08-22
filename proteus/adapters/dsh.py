@@ -49,6 +49,10 @@ PHASE_TIMEOUT_S = 600
 SOURCE_TAR = "/opt/dsh-source.tar"
 #: A full build:lib is ~330s; the gate's timeout must cover one on a changed source.
 BOOT_TIMEOUT_S = 900
+#: A 246-package DSH workspace takes roughly 90s to relink and cold-start on Docker
+#: Desktop even with a warm offline store. Keep enough headroom for slower hosts while
+#: still treating a genuine hang as a runtime viability failure.
+COLD_BOOT_TIMEOUT_S = 300
 SEED_INSTRUCTIONS = """\
 # Agent instructions
 
@@ -70,12 +74,14 @@ Proteus supplies the cross-phase operational handoff at
 runtime context outside the evolving snapshot; do not copy credentials or raw tool output
 into it.
 
-The image already contains an installed, built copy at `/opt/src`. Do not run `pnpm
-install` in either workspace, and do not create `node_modules` or package-manager caches
-in the candidate: those are generated dependencies, not evolution, and would pollute the
-persistent snapshot. `/opt/src` is the build of the frozen active snapshot. Do not sync,
-reload, or execute candidate source during a phase; Proteus owns the model-free boundary
-build and viability gate after reflect.
+The image already contains an installed, built copy at `/opt/src`. Do not create or persist
+`node_modules` or package-manager caches in the candidate: those are generated dependencies,
+not evolution, and would pollute the snapshot. You may add workspace packages or change
+package manifests, but keep `pnpm-lock.yaml` aligned. The boundary gate recreates links with
+a frozen offline install, so an inconsistent lockfile or a dependency absent from the baked
+store is rejected for repair. `/opt/src` is the build of the frozen active snapshot. Do not
+sync, reload, or execute candidate source during a phase; Proteus owns the model-free
+boundary build and viability gate after reflect.
 
 Each session is one phase of an episode. Harness files and the bounded Proteus handoff
 carry over; the raw conversation does not.
@@ -245,20 +251,42 @@ class DshHarness:
         return ((str(task), "/workspace/task"),) if task.is_dir() else ()
 
     def check_boot(self, harness_root: Path) -> str:
-        """Viability gate: sync + rebuild + `--version` through the image's boot wrapper.
+        """Build once, then cold-start the exact headless runtime in a fresh container.
 
-        The wrapper rebuilds from /workspace/src, so a type error the agent wrote into
-        its own source surfaces here as a legible build failure (exit 97 with the build
-        log tail), before any API spend. The timeout covers one full build:lib."""
+        The first probe exact-syncs the candidate, validates its dependency graph offline,
+        rebuilds it, writes the dist cache, and runs ``--version``. A second sandbox call
+        starts from a clean image, reloads that cache, and boots the headless plugin tree
+        without provider credentials. Keeping the probes in separate containers is
+        essential: a newly-added workspace package can compile in the build container yet
+        be absent from the cached outputs or runtime links used by episode N+1.
+        """
         harness = Path(harness_root)
         state = harness.parent / ".dsh-state"
         state.mkdir(exist_ok=True)
-        proc = self.sandbox.run(
-            harness.parent, ["--version"], env={}, timeout_s=BOOT_TIMEOUT_S,
-            mounts=((str(harness), "/workspace"), (str(state), "/state")))
+        mounts = ((str(harness), "/workspace"), (str(state), "/state"))
+        try:
+            proc = self.sandbox.run(
+                harness.parent, ["--version"], env={}, timeout_s=BOOT_TIMEOUT_S,
+                mounts=mounts)
+        except subprocess.TimeoutExpired:
+            return f"self-edited source build timed out after {BOOT_TIMEOUT_S}s"
         if proc.returncode != 0:
             return (f"self-edited source does not boot (exit {proc.returncode}): "
-                    f"{(proc.stderr or proc.stdout)[-400:]}")
+                    f"{(proc.stderr or proc.stdout)[-1200:]}")
+        try:
+            cold = self.sandbox.run(
+                harness.parent, ["--proteus-headless-smoke"], env={},
+                timeout_s=COLD_BOOT_TIMEOUT_S, mounts=mounts)
+        except subprocess.TimeoutExpired:
+            return ("self-edited source headless cold start timed out after "
+                    f"{COLD_BOOT_TIMEOUT_S}s")
+        if cold.returncode != 0:
+            detail = (cold.stderr or cold.stdout)[-1200:]
+            if "proteus-headless-smoke" in detail and "unknown option" in detail.lower():
+                return ("DSH source image predates the headless cold-start contract; "
+                        "rebuild environments/dsh-src before running evolution")
+            return (f"self-edited source fails headless cold start "
+                    f"(exit {cold.returncode}): {detail}")
         return ""
 
     def validate_candidate(self, harness_root: Path) -> str:
