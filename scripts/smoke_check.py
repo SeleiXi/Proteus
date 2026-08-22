@@ -12,7 +12,8 @@ Checks, per run in the sweep:
      either stay under it or carry the turn_capped flag;
   6. a non-neutral arm has a non-empty disposition fingerprint;
   7. harnesses with a self-code surface: src/ is in the episode-0 snapshot, the evolved
-     copy still boots, a planted error is refused by the gate, and restoring clears it.
+     copy passes its complete viability contract (including DSH's fresh headless cold
+     start), a planted error is refused by the gate, and restoring clears it.
 
 Exit code = number of failed checks. Prints one line per check per run.
 """
