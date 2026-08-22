@@ -180,8 +180,11 @@ class _RemoteFunction:
 try:
     Path(__file__).resolve().unlink()
     namespace = {"__name__": "__main__"}
+    exec(PROMPT_SOURCE, namespace)
+    candidate = _RemoteFunction()
+    namespace[ENTRY_POINT] = candidate
     exec(TEST_SOURCE, namespace)
-    namespace["check"](_RemoteFunction())
+    namespace["check"](candidate)
     passed = True
 except caught:
     passed = False
@@ -260,7 +263,9 @@ def _grade(ws: Path, spec: dict, name: str, *, sandbox=None) -> EvalResult:
     )
     driver = ws / "_grade.py"
     driver.write_text(
+        f"PROMPT_SOURCE = {spec['prompt']!r}\n"
         f"TEST_SOURCE = {spec['test']!r}\n"
+        f"ENTRY_POINT = {spec['entry_point']!r}\n"
         f"REPORT_PREFIX = {report_prefix!r}\n"
         f"WORKER_PREFIX = {worker_prefix!r}\n"
         f"WORKER_SOURCE = {worker_source!r}\n"

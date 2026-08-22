@@ -10,15 +10,17 @@ def _mini_dataset(tmp_path: Path) -> tuple[Path, dict]:
     record = {
         "task_id": "HumanEval/0",
         "prompt": (
+            "def expected_clamp(value: int) -> int:\n"
+            "    return sorted((0, value, 5))[1]\n\n\n"
             "def clamp(value: int) -> int:\n"
             "    \"\"\"Limit an integer to the inclusive range 0..5.\"\"\"\n"
         ),
         "canonical_solution": "    return min(5, max(0, value))\n",
         "test": (
             "def check(candidate):\n"
-            "    assert candidate(-1) == 0\n"
-            "    assert candidate(2) == 2\n"
-            "    assert candidate(10) == 5\n"
+            "    assert candidate(-1) == expected_clamp(-1)\n"
+            "    assert candidate(2) == expected_clamp(2)\n"
+            "    assert candidate(10) == expected_clamp(10)\n"
         ),
         "entry_point": "clamp",
     }
