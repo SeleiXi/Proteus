@@ -32,6 +32,12 @@ proteus run --harness pi \
     --goal "Implement the Bowling exercise and pass its tests." \
     --evaluator polyglot:bowling@observe \
     --arm neutral --seeds 2 --episodes 10 --out runs/bowling
+
+# Sanitized MBPP task; one JSON file is downloaded and cached on first use.
+proteus run --harness pi \
+    --goal "Solve MBPP task 2 in task/solution.py." \
+    --evaluator mbpp:2@observe \
+    --arm neutral --seeds 2 --episodes 10 --out runs/mbpp-2
 ```
 
 The CLI accepts at most one benchmark evaluator per run because a run has one task
@@ -55,6 +61,7 @@ to that `task/` directory.
 |---|---|---|---|
 | built-in | `proteus.bench.local` | nothing | smoke tests, plumbing, CI |
 | **lightweight external** | `proteus.bench.polyglot` | Python + one shallow clone | real ablations at negligible cost |
+| **lightweight external** | `proteus.bench.mbpp` | Python + one cached JSON file | short, dense-scored synthesis tasks |
 | heavyweight official | `proteus.bench.swe` | Docker, ~120 GB, x86_64 | headline numbers on the real thing |
 
 **Start from `polyglot.py`** — it is deliberately the worked example. ~180 lines, no
@@ -62,6 +69,11 @@ dependencies, and it demonstrates every property a contributed benchmark must ha
 `tests/test_polyglot.py` fabricates a miniature dataset in the benchmark's exact layout,
 so it also documents the shape your loader must read, and your tests never touch the
 network.
+
+MBPP uses Google Research's Apache-2.0 `sanitized-mbpp.json`. Set
+`PROTEUS_MBPP_PATH=/path/to/sanitized-mbpp.json` to use an existing copy; otherwise the
+file is cached under `~/.cache/proteus/mbpp/`. The prompt is seeded into the task, while
+the reference implementation and assertions remain held out by the grader.
 
 ## What a contributed benchmark must get right
 

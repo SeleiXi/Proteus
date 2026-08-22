@@ -22,18 +22,23 @@ def default_grader_sandbox():
 
 
 def run_python(ws: Path, script: str, *, timeout_s: int,
-               env: Mapping[str, str] | None = None, sandbox=None) -> subprocess.CompletedProcess:
+               env: Mapping[str, str] | None = None, sandbox=None,
+               isolated: bool = False) -> subprocess.CompletedProcess:
     """Execute a task-local script without ever falling back to host Python."""
     runner = sandbox or default_grader_sandbox()
+    command = ["python"]
+    if isolated:
+        command.append("-I")
+    command.append(script)
     try:
         return runner.run(
-            Path(ws), ["python", script], env=dict(env or {}), timeout_s=timeout_s,
+            Path(ws), command, env=dict(env or {}), timeout_s=timeout_s,
             mounts=((str(Path(ws)), "/task"),),
         )
     except subprocess.TimeoutExpired:
         raise
     except Exception as exc:  # noqa: BLE001 - unavailable isolation is a scored failure
         return subprocess.CompletedProcess(
-            ["python", script], 126, "",
+            command, 126, "",
             f"secure grader unavailable ({type(exc).__name__}: {exc})",
         )
