@@ -12,19 +12,60 @@ campaign's exact goal and benchmark stay versioned rather than copied from a she
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import threading
 import time
+from functools import partial
 from pathlib import Path
 
 from proteus import __version__
 from proteus.adapters.dsh import DshHarness
 from proteus.bench.dsh_audio import GOAL_TEXT, NAME, evaluate_audio_capability
 from proteus.core import EvaluatorSpec, GoalConfig, NEUTRAL, Visibility
+from proteus.core.continuity import HandoffStore
 from proteus.report import write_report
 from proteus.sweep import SweepConfig, run_sweep
+
+
+class SnapshotSeededDshHarness(DshHarness):
+    """Start a new, condition-locked trajectory from an earlier valid harness snapshot."""
+
+    def __init__(self, initial_harness: Path, initial_handoff: Path | None = None,
+                 **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.initial_harness = Path(initial_harness).expanduser().resolve()
+        self.initial_handoff = (
+            Path(initial_handoff).expanduser().resolve()
+            if initial_handoff is not None else None
+        )
+
+    def seed(self, harness_root: Path, rng_seed: int = 0) -> None:
+        del rng_seed
+        source = self.initial_harness
+        if not (source / "src").is_dir() or not (source / "AGENTS.md").is_file():
+            raise ValueError(
+                f"continuation seed is not a DSH harness snapshot: {source}"
+            )
+        if harness_root.exists():
+            raise FileExistsError(
+                f"continuation destination already exists: {harness_root}"
+            )
+        harness_root.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, harness_root, symlinks=True)
+        if self.initial_handoff is not None:
+            if not self.initial_handoff.is_file():
+                raise ValueError(
+                    f"continuation handoff does not exist: {self.initial_handoff}"
+                )
+            content = self.initial_handoff.read_text(encoding="utf-8")
+            handoffs = HandoffStore(harness_root.parent)
+            handoffs.initialise()
+            handoffs.latest.write_text(content.rstrip() + "\n", encoding="utf-8")
+            handoffs.current.write_text(content.rstrip() + "\n", encoding="utf-8")
 
 
 def _write_live_state(root: Path, status: str) -> None:
@@ -99,6 +140,23 @@ def main() -> None:
     parser.add_argument("--live-token-env", default="GH_TOKEN")
     parser.add_argument("--live-feed", help="optional local copy of the public JSON feed")
     parser.add_argument("--live-watch", type=float, default=15)
+    parser.add_argument(
+        "--initial-harness", type=Path,
+        help=("start a new trajectory from this valid harness snapshot instead of the "
+              "pinned rc.8 image seed"),
+    )
+    parser.add_argument(
+        "--initial-handoff", type=Path,
+        help="bounded operational handoff carried from the parent trajectory",
+    )
+    parser.add_argument(
+        "--parent-snapshot", default="",
+        help="non-secret snapshot identifier recorded as continuation lineage",
+    )
+    parser.add_argument(
+        "--episode-offset", type=int, default=0,
+        help="logical episode count completed by the parent trajectory",
+    )
     args = parser.parse_args()
     if args.phase_timeout <= 0:
         parser.error("--phase-timeout must be positive; use a large value to approximate no timeout")
@@ -114,6 +172,16 @@ def main() -> None:
         parser.error("phase budgets must sum to --max-turns")
     if args.hard_max_turns < args.max_turns:
         parser.error("--hard-max-turns must be at least --max-turns")
+    if args.episode_offset < 0:
+        parser.error("--episode-offset cannot be negative")
+    if args.initial_harness is None and (
+        args.initial_handoff is not None or args.parent_snapshot or args.episode_offset
+    ):
+        parser.error(
+            "--initial-handoff/--parent-snapshot/--episode-offset require --initial-harness"
+        )
+    if args.initial_harness is not None and not args.parent_snapshot:
+        parser.error("--initial-harness requires --parent-snapshot for durable lineage")
 
     benchmark = EvaluatorSpec(
         name=NAME,
@@ -122,12 +190,40 @@ def main() -> None:
         visibility=Visibility.OBSERVE,
     )
     root = Path(args.out).expanduser().resolve()
+    adapter_kwargs = {
+        "image": args.image,
+        "permission_mode": args.dsh_permission_mode,
+        "phase_timeout_s": args.phase_timeout,
+    }
+    if args.initial_harness is None:
+        adapter_factory = partial(DshHarness, **adapter_kwargs)
+        lineage = {}
+    else:
+        initial_harness = args.initial_harness.expanduser().resolve()
+        initial_handoff = (
+            args.initial_handoff.expanduser().resolve()
+            if args.initial_handoff is not None else None
+        )
+        adapter_factory = partial(
+            SnapshotSeededDshHarness,
+            initial_harness=initial_harness,
+            initial_handoff=initial_handoff,
+            **adapter_kwargs,
+        )
+        handoff_sha256 = (
+            hashlib.sha256(initial_handoff.read_bytes()).hexdigest()
+            if initial_handoff is not None and initial_handoff.is_file() else ""
+        )
+        lineage = {
+            "continuation": {
+                "parent_snapshot": args.parent_snapshot,
+                "logical_episode_offset": args.episode_offset,
+                "parent_handoff_sha256": handoff_sha256,
+            }
+        }
     cfg = SweepConfig(
         name="dsh-rc8-audio-modality-phase-budget-v2",
-        adapter_factory=lambda: DshHarness(
-            image=args.image, permission_mode=args.dsh_permission_mode,
-            phase_timeout_s=args.phase_timeout,
-        ),
+        adapter_factory=adapter_factory,
         arms=(NEUTRAL,),
         seeds=1,
         goal=GoalConfig.of(text=GOAL_TEXT, evaluators=(benchmark,)),
@@ -140,6 +236,7 @@ def main() -> None:
         checkpoint_turns=args.checkpoint_turns,
         announce_budget=True,
         on_existing="resume" if args.resume else "refuse",
+        condition_metadata=lineage,
     )
     root.mkdir(parents=True, exist_ok=True)
     write_report(root)

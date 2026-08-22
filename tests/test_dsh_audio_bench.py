@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from examples.dsh_audio_evolution import SnapshotSeededDshHarness
 from proteus.bench.dsh_audio import capability_gates
 
 
@@ -44,3 +47,32 @@ def test_acp_rejection_does_not_count_as_admission(tmp_path):
         function persistAudio() {}
     """)
     assert not capability_gates(tmp_path)["ACP admission"]
+
+
+def test_continuation_seed_copies_a_valid_harness_snapshot(tmp_path):
+    source = tmp_path / "parent" / "harness"
+    _write(source, "AGENTS.md", "instructions\n")
+    _write(source, "src/package.json", '{"name":"continued"}\n')
+    _write(source, "notes/learned.md", "persistent state\n")
+    handoff = tmp_path / "parent" / "latest.md"
+    handoff.write_text("# Prior handoff\n\nContinue the validation.\n")
+
+    adapter = SnapshotSeededDshHarness(source, handoff)
+    destination = tmp_path / "child" / "harness"
+    adapter.seed(destination)
+
+    assert (destination / "src/package.json").read_text() == '{"name":"continued"}\n'
+    assert (destination / "notes/learned.md").read_text() == "persistent state\n"
+    assert (destination.parent / ".proteus-state/latest.md").read_text() == \
+        "# Prior handoff\n\nContinue the validation.\n"
+    with pytest.raises(FileExistsError, match="destination already exists"):
+        adapter.seed(destination)
+
+
+def test_continuation_seed_rejects_a_non_harness_directory(tmp_path):
+    source = tmp_path / "not-a-harness"
+    source.mkdir()
+    adapter = SnapshotSeededDshHarness(source)
+
+    with pytest.raises(ValueError, match="not a DSH harness snapshot"):
+        adapter.seed(tmp_path / "child" / "harness")
