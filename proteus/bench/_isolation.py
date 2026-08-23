@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Mapping
 
 
@@ -84,8 +86,6 @@ def _decode(node):
     raise ValueError(f"unknown isolated value type: {kind!r}")
 '''
 
-EXECUTOR_PREFIX = "PROTEUS_CANDIDATE_RESULT:"
-
 EXECUTOR_SOURCE = _CODEC + '''\
 import builtins
 import json
@@ -98,11 +98,12 @@ trusted_compile = compile
 caught = BaseException
 json_loads = json.loads
 json_dumps = json.dumps
-emit = sys.stdout.write
-flush = sys.stdout.flush
+write_result = os.write
+close_result = os.close
 exit_now = os._exit
 here = Path.cwd()
 solution = here / "solution.py"
+result_fd = int(sys.argv[2])
 namespace = {"__name__": "__main__", "__file__": str(solution),
              "__builtins__": dict(vars(builtins))}
 try:
@@ -114,16 +115,20 @@ try:
     response = {"ok": True, "value": _encode(value)}
 except caught as exc:
     response = {"ok": False, "error": f"{_type(exc).__name__}: {exc}"}
-emit(EXECUTOR_PREFIX + json_dumps(response, separators=(",", ":")) + "\\n")
-flush()
+payload = json_dumps(response, separators=(",", ":")).encode("utf-8")
+while payload:
+    payload = payload[write_result(result_fd, payload):]
+close_result(result_fd)
 exit_now(0)
 '''
 
 WORKER_SOURCE = _CODEC + '''\
 import json
 import os
+import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 caught = BaseException
@@ -133,24 +138,39 @@ emit = sys.stdout.write
 flush = sys.stdout.flush
 exit_now = os._exit
 here = Path.cwd()
+
+def _terminate_process_group(proc):
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    return proc.communicate()
+
 try:
-    proc = subprocess.run(
-        [sys.executable, "-c", EXECUTOR_SOURCE, sys.argv[1]],
-        cwd=here,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=float(sys.argv[2]),
-        check=False,
-    )
+    with tempfile.TemporaryFile() as result_stream:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", EXECUTOR_SOURCE, sys.argv[1],
+             str(result_stream.fileno())],
+            cwd=here,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            pass_fds=(result_stream.fileno(),),
+            start_new_session=True,
+        )
+        try:
+            proc.communicate(timeout=float(sys.argv[2]))
+        except subprocess.TimeoutExpired:
+            _terminate_process_group(proc)
+            raise RuntimeError("candidate executor timed out")
+        result_stream.seek(0)
+        payload = result_stream.read()
     if proc.returncode != 0:
         raise RuntimeError("candidate executor failed")
-    reports = [
-        line for line in proc.stdout.splitlines() if line.startswith(EXECUTOR_PREFIX)
-    ]
-    if not reports:
+    if not payload:
         raise RuntimeError("candidate executor produced no result")
-    candidate_response = json_loads(reports[-1][len(EXECUTOR_PREFIX):])
+    candidate_response = json_loads(payload.decode("utf-8"))
     if candidate_response.get("ok"):
         response = {"ok": True, "value": _encode(_decode(candidate_response["value"]))}
     else:
@@ -167,6 +187,7 @@ exit_now(0)
 DRIVER_SUPPORT_SOURCE = _CODEC + '''\
 import json
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -177,23 +198,35 @@ flush = sys.stdout.flush
 exit_now = os._exit
 here = Path(__file__).resolve().parent
 
+def _terminate_process_group(proc):
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    return proc.communicate()
+
 def _remote_call(name, args, kwargs):
     request = json.dumps(
         {"name": name, "args": _encode(args), "kwargs": _encode(kwargs)},
         separators=(",", ":"),
     )
-    proc = subprocess.run(
+    proc = subprocess.Popen(
         [sys.executable, "-I", "-c", WORKER_SOURCE, request, str(CALL_TIMEOUT_S)],
         cwd=here,
         stdin=subprocess.DEVNULL,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=CALL_TIMEOUT_S,
-        check=False,
+        start_new_session=True,
     )
+    try:
+        stdout, _ = proc.communicate(timeout=SUPERVISOR_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        _terminate_process_group(proc)
+        raise RuntimeError("candidate worker timed out")
     if proc.returncode != 0:
         raise RuntimeError("candidate worker failed")
-    reports = [line for line in proc.stdout.splitlines() if line.startswith(WORKER_PREFIX)]
+    reports = [line for line in stdout.splitlines() if line.startswith(WORKER_PREFIX)]
     if not reports:
         raise RuntimeError("candidate worker produced no report")
     response = json.loads(reports[-1][len(WORKER_PREFIX):])
@@ -213,11 +246,9 @@ class _RemoteFunction:
 
 def build_worker_source(worker_prefix: str) -> str:
     """Return a self-contained candidate worker with a private result prefix."""
-    executor = f"EXECUTOR_PREFIX = {EXECUTOR_PREFIX!r}\n" + EXECUTOR_SOURCE
     return (
         f"WORKER_PREFIX = {worker_prefix!r}\n"
-        f"EXECUTOR_PREFIX = {EXECUTOR_PREFIX!r}\n"
-        f"EXECUTOR_SOURCE = {executor!r}\n"
+        f"EXECUTOR_SOURCE = {EXECUTOR_SOURCE!r}\n"
         + WORKER_SOURCE
     )
 
@@ -238,6 +269,35 @@ def build_driver_source(
         "WORKER_PREFIX": worker_prefix,
         "WORKER_SOURCE": worker,
         "CALL_TIMEOUT_S": call_timeout_s,
+        "SUPERVISOR_TIMEOUT_S": call_timeout_s + 2,
     }
     header = "".join(f"{name} = {value!r}\n" for name, value in values.items())
     return header + DRIVER_SUPPORT_SOURCE + body
+
+
+def install_driver(path: Path, source: str) -> None:
+    """Replace an exact file/symlink entry and create a new driver without following links."""
+    path = Path(path)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(source)
+    except BaseException:
+        cleanup_driver(path)
+        raise
+
+
+def cleanup_driver(path: Path) -> OSError | None:
+    """Unlink only the exact driver entry, reporting rather than raising cleanup errors."""
+    try:
+        Path(path).unlink()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return exc
+    return None

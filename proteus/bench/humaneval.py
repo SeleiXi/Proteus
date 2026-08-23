@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 from proteus.bench._datasets import download_verified
-from proteus.bench._isolation import build_driver_source
+from proteus.bench._isolation import cleanup_driver, build_driver_source, install_driver
 from proteus.bench.task import BenchTask
 from proteus.core.goal import EvalResult
 
@@ -28,7 +28,7 @@ CALL_TIMEOUT_S = 15
 
 _DRIVER_BODY = '''\
 try:
-    Path(__file__).resolve().unlink()
+    Path(__file__).unlink()
     namespace = {"__name__": "__main__"}
     exec(PROMPT_SOURCE, namespace)
     candidate = _RemoteFunction(ENTRY_POINT)
@@ -98,20 +98,28 @@ def _grade(ws: Path, spec: dict, name: str, *, sandbox=None) -> EvalResult:
     report_prefix = f"PROTEUS_HUMANEVAL_RESULT:{secrets.token_hex(16)}:"
     worker_prefix = f"PROTEUS_HUMANEVAL_VALUE:{secrets.token_hex(16)}:"
     driver = ws / "_grade.py"
-    driver.write_text(
-        build_driver_source(
-            report_prefix=report_prefix,
-            worker_prefix=worker_prefix,
-            call_timeout_s=CALL_TIMEOUT_S,
-            bindings={
-                "PROMPT_SOURCE": spec["prompt"],
-                "TEST_SOURCE": spec["test"],
-                "ENTRY_POINT": spec["entry_point"],
-            },
-            body=_DRIVER_BODY,
-        ),
-        encoding="utf-8",
+    source = build_driver_source(
+        report_prefix=report_prefix,
+        worker_prefix=worker_prefix,
+        call_timeout_s=CALL_TIMEOUT_S,
+        bindings={
+            "PROMPT_SOURCE": spec["prompt"],
+            "TEST_SOURCE": spec["test"],
+            "ENTRY_POINT": spec["entry_point"],
+        },
+        body=_DRIVER_BODY,
     )
+    try:
+        install_driver(driver, source)
+    except OSError as exc:
+        return EvalResult(
+            name=name,
+            score=0.0,
+            passed=False,
+            detail=f"grader setup failed ({type(exc).__name__}: {exc})",
+        )
+
+    timed_out = False
     try:
         from proteus.bench.sandbox import run_python
 
@@ -119,14 +127,26 @@ def _grade(ws: Path, spec: dict, name: str, *, sandbox=None) -> EvalResult:
             ws, "_grade.py", timeout_s=GRADE_TIMEOUT_S, sandbox=sandbox, isolated=True
         )
     except subprocess.TimeoutExpired:
+        timed_out = True
+
+    cleanup_error = cleanup_driver(driver)
+    if cleanup_error is not None:
+        return EvalResult(
+            name=name,
+            score=0.0,
+            passed=False,
+            detail=(
+                "grader cleanup failed "
+                f"({type(cleanup_error).__name__}: {cleanup_error})"
+            ),
+        )
+    if timed_out:
         return EvalResult(
             name=name,
             score=0.0,
             passed=False,
             detail=f"grading timed out after {GRADE_TIMEOUT_S}s",
         )
-    finally:
-        driver.unlink(missing_ok=True)
 
     stdout = getattr(proc, "stdout", "")
     stderr = getattr(proc, "stderr", "")

@@ -18,7 +18,7 @@ import subprocess
 from pathlib import Path
 
 from proteus.bench._datasets import download_verified
-from proteus.bench._isolation import build_driver_source
+from proteus.bench._isolation import cleanup_driver, build_driver_source, install_driver
 from proteus.bench.task import BenchTask
 from proteus.core.goal import EvalResult
 
@@ -37,7 +37,7 @@ def _report(passed):
     exit_now(0)
 
 try:
-    Path(__file__).resolve().unlink()
+    Path(__file__).unlink()
 except OSError:
     _report(0)
 
@@ -143,7 +143,17 @@ def _grade(ws: Path, spec: dict, name: str, *, sandbox=None) -> EvalResult:
     report_prefix = f"PROTEUS_MBPP_RESULT:{secrets.token_hex(16)}:"
     worker_prefix = f"PROTEUS_MBPP_VALUE:{secrets.token_hex(16)}:"
     driver = ws / "_grade.py"
-    driver.write_text(_driver(spec, report_prefix, worker_prefix), encoding="utf-8")
+    try:
+        install_driver(driver, _driver(spec, report_prefix, worker_prefix))
+    except OSError as exc:
+        return EvalResult(
+            name=name,
+            score=0.0,
+            passed=False,
+            detail=f"grader setup failed ({type(exc).__name__}: {exc})",
+        )
+
+    timed_out = False
     try:
         from proteus.bench.sandbox import run_python
 
@@ -151,14 +161,26 @@ def _grade(ws: Path, spec: dict, name: str, *, sandbox=None) -> EvalResult:
             ws, "_grade.py", timeout_s=GRADE_TIMEOUT_S, sandbox=sandbox, isolated=True
         )
     except subprocess.TimeoutExpired:
+        timed_out = True
+
+    cleanup_error = cleanup_driver(driver)
+    if cleanup_error is not None:
+        return EvalResult(
+            name=name,
+            score=0.0,
+            passed=False,
+            detail=(
+                "grader cleanup failed "
+                f"({type(cleanup_error).__name__}: {cleanup_error})"
+            ),
+        )
+    if timed_out:
         return EvalResult(
             name=name,
             score=0.0,
             passed=False,
             detail=f"grading timed out after {GRADE_TIMEOUT_S}s",
         )
-    finally:
-        driver.unlink(missing_ok=True)
 
     expected = len(spec["test_list"])
     stdout = getattr(proc, "stdout", "")

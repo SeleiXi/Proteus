@@ -57,6 +57,37 @@ def test_verified_download_rejects_a_checksum_mismatch_without_publishing_cache(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_verified_download_removes_valid_payload_when_validation_raises(tmp_path):
+    from proteus.bench._datasets import download_verified
+
+    payload = b'[{"task_id": 1}]'
+    cache = tmp_path / "dataset.json"
+    temporary = []
+
+    def reject(path):
+        temporary.append(path)
+        assert path.read_bytes() == payload
+        raise ValueError("invalid dataset format")
+
+    with patch("proteus.bench._datasets.request.urlopen", return_value=io.BytesIO(payload)):
+        try:
+            download_verified(
+                name="fixture",
+                url="https://example.invalid/pinned.json",
+                expected_sha256=hashlib.sha256(payload).hexdigest(),
+                cache=cache,
+                validate=reject,
+            )
+        except ValueError as exc:
+            assert str(exc) == "invalid dataset format"
+        else:
+            raise AssertionError("invalid dataset was accepted")
+
+    assert len(temporary) == 1 and not temporary[0].exists()
+    assert not cache.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_official_dataset_urls_and_hashes_are_immutable():
     from proteus.bench import humaneval, mbpp
 
