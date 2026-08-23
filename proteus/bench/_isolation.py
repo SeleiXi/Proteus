@@ -84,7 +84,9 @@ def _decode(node):
     raise ValueError(f"unknown isolated value type: {kind!r}")
 '''
 
-WORKER_SOURCE = _CODEC + '''\
+EXECUTOR_PREFIX = "PROTEUS_CANDIDATE_RESULT:"
+
+EXECUTOR_SOURCE = _CODEC + '''\
 import builtins
 import json
 import os
@@ -112,6 +114,51 @@ try:
     response = {"ok": True, "value": _encode(value)}
 except caught as exc:
     response = {"ok": False, "error": f"{_type(exc).__name__}: {exc}"}
+emit(EXECUTOR_PREFIX + json_dumps(response, separators=(",", ":")) + "\\n")
+flush()
+exit_now(0)
+'''
+
+WORKER_SOURCE = _CODEC + '''\
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+caught = BaseException
+json_loads = json.loads
+json_dumps = json.dumps
+emit = sys.stdout.write
+flush = sys.stdout.flush
+exit_now = os._exit
+here = Path.cwd()
+try:
+    proc = subprocess.run(
+        [sys.executable, "-c", EXECUTOR_SOURCE, sys.argv[1]],
+        cwd=here,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=float(sys.argv[2]),
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError("candidate executor failed")
+    reports = [
+        line for line in proc.stdout.splitlines() if line.startswith(EXECUTOR_PREFIX)
+    ]
+    if not reports:
+        raise RuntimeError("candidate executor produced no result")
+    candidate_response = json_loads(reports[-1][len(EXECUTOR_PREFIX):])
+    if candidate_response.get("ok"):
+        response = {"ok": True, "value": _encode(_decode(candidate_response["value"]))}
+    else:
+        response = {"ok": False, "error": candidate_response.get(
+            "error", "candidate call failed"
+        )}
+except caught as exc:
+    response = {"ok": False, "error": f"{_type(exc).__name__}: {exc}"}
 emit(WORKER_PREFIX + json_dumps(response, separators=(",", ":")) + "\\n")
 flush()
 exit_now(0)
@@ -136,7 +183,7 @@ def _remote_call(name, args, kwargs):
         separators=(",", ":"),
     )
     proc = subprocess.run(
-        [sys.executable, "-c", WORKER_SOURCE, request],
+        [sys.executable, "-I", "-c", WORKER_SOURCE, request, str(CALL_TIMEOUT_S)],
         cwd=here,
         stdin=subprocess.DEVNULL,
         capture_output=True,
@@ -166,7 +213,13 @@ class _RemoteFunction:
 
 def build_worker_source(worker_prefix: str) -> str:
     """Return a self-contained candidate worker with a private result prefix."""
-    return f"WORKER_PREFIX = {worker_prefix!r}\n" + WORKER_SOURCE
+    executor = f"EXECUTOR_PREFIX = {EXECUTOR_PREFIX!r}\n" + EXECUTOR_SOURCE
+    return (
+        f"WORKER_PREFIX = {worker_prefix!r}\n"
+        f"EXECUTOR_PREFIX = {EXECUTOR_PREFIX!r}\n"
+        f"EXECUTOR_SOURCE = {executor!r}\n"
+        + WORKER_SOURCE
+    )
 
 
 def build_driver_source(

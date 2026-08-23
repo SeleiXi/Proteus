@@ -62,6 +62,23 @@ def test_candidate_attacks_cannot_reach_or_forge_trusted_control(tmp_path, trust
             assert result.score == 0.0 and not result.passed, (attack, name, result)
 
 
+def test_candidate_cannot_forge_private_worker_report_then_exit(tmp_path, trusted_grader):
+    source = (
+        "import json, os, sys\n"
+        "trusted = sys._getframe(1).f_globals\n"
+        "request = trusted['request']\n"
+        "value = int(request['args']['items'][0]['value'])\n"
+        "value = min(5, max(0, value))\n"
+        "response = {'ok': True, 'value': {'type': 'int', 'value': str(value)}}\n"
+        "print(trusted['WORKER_PREFIX'] + json.dumps(response), flush=True)\n"
+        "os._exit(0)\n"
+    )
+    for name, task, ws in _targets(tmp_path):
+        (ws / "solution.py").write_text(source, encoding="utf-8")
+        result = task.grade(ws, sandbox=trusted_grader)
+        assert result.score == 0.0 and not result.passed, (name, result)
+
+
 def test_generated_driver_overwrites_and_removes_pre_existing_driver_file(
     tmp_path, trusted_grader
 ):
