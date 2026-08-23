@@ -15,17 +15,17 @@ import json
 import os
 import secrets
 import subprocess
-import tempfile
 from pathlib import Path
-from urllib import request
 
+from proteus.bench._datasets import download_verified
 from proteus.bench.task import BenchTask
 from proteus.core.goal import EvalResult
 
 DATA_URL = (
     "https://raw.githubusercontent.com/google-research/google-research/"
-    "master/mbpp/sanitized-mbpp.json"
+    "e20eb00d074cdb569ee27318f112ea1e85bbb98f/mbpp/sanitized-mbpp.json"
 )
+DATA_SHA256 = "ca95deaa9a01ef0a6f439f88bcf0dd3db3563d22f22aad6cae04ebb9a8d8c8e9"
 GRADE_TIMEOUT_S = 60
 CALL_TIMEOUT_S = 15
 
@@ -220,23 +220,13 @@ def dataset_path(dataset_file: str | os.PathLike | None = None) -> Path:
     if env:
         return Path(env).expanduser()
     cache = Path.home() / ".cache" / "proteus" / "mbpp" / "sanitized-mbpp.json"
-    if not cache.exists():
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        with request.urlopen(DATA_URL, timeout=30) as response:
-            payload = response.read()
-        rows = json.loads(payload.decode("utf-8"))
-        if not isinstance(rows, list):
-            raise ValueError("sanitized MBPP download is not a JSON list")
-        temp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(dir=cache.parent, delete=False) as tmp:
-                tmp.write(payload)
-                temp_path = Path(tmp.name)
-            temp_path.replace(cache)
-        finally:
-            if temp_path is not None:
-                temp_path.unlink(missing_ok=True)
-    return cache
+    return download_verified(
+        name="MBPP",
+        url=DATA_URL,
+        expected_sha256=DATA_SHA256,
+        cache=cache,
+        validate=_records,
+    )
 
 
 def _records(path: Path) -> dict[str, dict]:

@@ -1,5 +1,6 @@
 """MBPP adapter tests against a fabricated official-format dataset, without network."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -65,7 +66,10 @@ def test_default_dataset_downloads_to_cache_once(tmp_path):
     old_dataset = os.environ.pop("PROTEUS_MBPP_PATH", None)
     os.environ["HOME"] = str(tmp_path / "home")
     try:
-        with patch("proteus.bench.mbpp.request.urlopen", return_value=io.BytesIO(payload)) as get:
+        digest = hashlib.sha256(payload).hexdigest()
+        with patch("proteus.bench.mbpp.DATA_SHA256", digest), patch(
+            "proteus.bench._datasets.request.urlopen", return_value=io.BytesIO(payload)
+        ) as get:
             first = dataset_path()
             second = dataset_path()
         assert first == second and first.is_file()
@@ -78,6 +82,28 @@ def test_default_dataset_downloads_to_cache_once(tmp_path):
             os.environ["HOME"] = old_home
         if old_dataset is not None:
             os.environ["PROTEUS_MBPP_PATH"] = old_dataset
+
+
+def test_user_supplied_dataset_paths_bypass_official_verification(tmp_path):
+    from unittest.mock import patch
+
+    from proteus.bench import mbpp
+
+    dataset, _ = _mini_dataset(tmp_path)
+    with patch.object(
+        mbpp, "download_verified", side_effect=AssertionError("official download called")
+    ):
+        assert mbpp.dataset_path(dataset) == dataset
+
+        old = os.environ.get("PROTEUS_MBPP_PATH")
+        os.environ["PROTEUS_MBPP_PATH"] = str(dataset)
+        try:
+            assert mbpp.dataset_path() == dataset
+        finally:
+            if old is None:
+                os.environ.pop("PROTEUS_MBPP_PATH", None)
+            else:
+                os.environ["PROTEUS_MBPP_PATH"] = old
 
 
 def test_seeded_stub_fails_all_held_out_tests(tmp_path, trusted_grader):

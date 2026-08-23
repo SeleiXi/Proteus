@@ -11,16 +11,17 @@ import json
 import os
 import secrets
 import subprocess
-import tempfile
 from pathlib import Path
-from urllib import request
 
+from proteus.bench._datasets import download_verified
 from proteus.bench.task import BenchTask
 from proteus.core.goal import EvalResult
 
 DATA_URL = (
-    "https://raw.githubusercontent.com/openai/human-eval/master/data/HumanEval.jsonl.gz"
+    "https://raw.githubusercontent.com/openai/human-eval/"
+    "6d43fb980f9fee3c892a914eda09951f772ad10d/data/HumanEval.jsonl.gz"
 )
+DATA_SHA256 = "b796127e635a67f93fb35c04f4cb03cf06f38c8072ee7cee8833d7bee06979ef"
 GRADE_TIMEOUT_S = 60
 CALL_TIMEOUT_S = 15
 
@@ -202,23 +203,13 @@ def dataset_path(dataset_file: str | os.PathLike | None = None) -> Path:
     if env:
         return Path(env).expanduser()
     cache = Path.home() / ".cache" / "proteus" / "humaneval" / "HumanEval.jsonl.gz"
-    if not cache.exists():
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        with request.urlopen(DATA_URL, timeout=30) as response:
-            payload = response.read()
-        temp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                dir=cache.parent, suffix=".jsonl.gz", delete=False
-            ) as tmp:
-                tmp.write(payload)
-                temp_path = Path(tmp.name)
-            _records(temp_path)
-            temp_path.replace(cache)
-        finally:
-            if temp_path is not None:
-                temp_path.unlink(missing_ok=True)
-    return cache
+    return download_verified(
+        name="HumanEval",
+        url=DATA_URL,
+        expected_sha256=DATA_SHA256,
+        cache=cache,
+        validate=_records,
+    )
 
 
 def _records(path: Path) -> dict[str, dict]:

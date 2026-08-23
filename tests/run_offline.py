@@ -28,6 +28,7 @@ def make_trusted_grader():
 def main() -> int:
     import test_aki_adapter as A
     import test_bench as B
+    import test_datasets as D
     import test_goals as G
     import test_humaneval as H
     import test_instrument as I
@@ -37,7 +38,7 @@ def main() -> int:
     import test_smoke as S
     tmp = pathlib.Path(tempfile.mkdtemp())
     passed = failed = 0
-    for mod in (G, S, A, B, H, I, M, P, C):
+    for mod in (G, S, A, B, D, H, I, M, P, C):
         for name in [n for n in dir(mod) if n.startswith("test_")]:
             fn = getattr(mod, name)
             d = tmp / mod.__name__ / name

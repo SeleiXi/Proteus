@@ -1,6 +1,7 @@
 """HumanEval adapter tests against a fabricated official-format dataset, offline."""
 
 import gzip
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -72,8 +73,9 @@ def test_default_dataset_downloads_to_cache_once(tmp_path):
     old_dataset = os.environ.pop("PROTEUS_HUMANEVAL_PATH", None)
     os.environ["HOME"] = str(tmp_path / "home")
     try:
-        with patch(
-            "proteus.bench.humaneval.request.urlopen", return_value=io.BytesIO(payload)
+        digest = hashlib.sha256(payload).hexdigest()
+        with patch("proteus.bench.humaneval.DATA_SHA256", digest), patch(
+            "proteus.bench._datasets.request.urlopen", return_value=io.BytesIO(payload)
         ) as get:
             first = dataset_path()
             second = dataset_path()
@@ -87,6 +89,28 @@ def test_default_dataset_downloads_to_cache_once(tmp_path):
             os.environ["HOME"] = old_home
         if old_dataset is not None:
             os.environ["PROTEUS_HUMANEVAL_PATH"] = old_dataset
+
+
+def test_user_supplied_dataset_paths_bypass_official_verification(tmp_path):
+    from unittest.mock import patch
+
+    from proteus.bench import humaneval
+
+    dataset, _ = _mini_dataset(tmp_path)
+    with patch.object(
+        humaneval, "download_verified", side_effect=AssertionError("official download called")
+    ):
+        assert humaneval.dataset_path(dataset) == dataset
+
+        old = os.environ.get("PROTEUS_HUMANEVAL_PATH")
+        os.environ["PROTEUS_HUMANEVAL_PATH"] = str(dataset)
+        try:
+            assert humaneval.dataset_path() == dataset
+        finally:
+            if old is None:
+                os.environ.pop("PROTEUS_HUMANEVAL_PATH", None)
+            else:
+                os.environ["PROTEUS_HUMANEVAL_PATH"] = old
 
 
 def test_seeded_stub_fails_held_out_check(tmp_path, trusted_grader):
