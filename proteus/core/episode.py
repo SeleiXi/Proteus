@@ -121,7 +121,7 @@ def _clear_pending_candidate(root: Path) -> None:
     pending_candidate_path(root).unlink(missing_ok=True)
 
 
-def _repair_feedback(pending: dict, prior: str = "") -> str:
+def _repair_notice(pending: dict) -> str:
     detail = str(pending.get("error", ""))[:600]
     notice = (
         "Proteus restored the exact failed candidate as this episode's writable repair "
@@ -130,6 +130,12 @@ def _repair_feedback(pending: dict, prior: str = "") -> str:
     )
     if detail:
         notice += f" Previous failure: {detail}"
+    return notice
+
+
+def _repair_feedback(pending: dict, prior: str = "") -> str:
+    """Backward-compatible composition helper for callers of the former private API."""
+    notice = _repair_notice(pending)
     return f"{notice}\n\n{prior}" if prior else notice
 
 
@@ -191,7 +197,8 @@ class RunResult:
     adapter reports them) — what a cost estimate is built from."""
 
 
-def _phase_prompts(cfg: RunConfig, prior_feedback: str) -> dict[str, str]:
+def _phase_prompts(cfg: RunConfig, prior_feedback: str,
+                   repair_notice: str = "") -> dict[str, str]:
     """Assemble one episode's four default protocol prompts.
 
     The framework merges goal text and visible evaluator feedback without asserting that
@@ -234,6 +241,12 @@ def _phase_prompts(cfg: RunConfig, prior_feedback: str) -> dict[str, str]:
         objective = f"Evolution objective for this run:\n{gt}"
         for ph in PHASES:
             prompts[ph] = f"{objective}\n\n{prompts[ph]}"
+    # A viability/run failure is a controller-owned fact, not evaluator feedback. Every
+    # fresh phase must retain it until the restored candidate passes the boundary gate;
+    # otherwise an interrupted observe can leave propose/act repairing without the error.
+    if repair_notice:
+        for ph in PHASES:
+            prompts[ph] = f"{repair_notice}\n\n{prompts[ph]}"
     # evaluator feedback the agent is allowed to see enters the observe phase
     if prior_feedback:
         prompts["observe"] = f"{prior_feedback}\n\n{prompts['observe']}"
@@ -374,6 +387,7 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
     # post-resume episode worse than everything before the interruption.
     eval_history: list[dict] = []
     prior_feedback = ""
+    repair_notice = ""
     totals: dict = {}
     best_score: float | None = None
     history_path = eval_history_path(cfg.root)
@@ -441,13 +455,11 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
             by_name = {r["name"]: EvalResult(**r) for r in (last.get("results") or [])}
             prior_feedback = cfg.goal.observe_feedback(by_name)
             if last.get("failure_kind") == "viability":
-                recovery = (
+                repair_notice = (
                     "Your last candidate failed the episode-boundary viability gate and "
                     "was rolled back. Fix the underlying issue in a new candidate: "
                     f"{str(last.get('error', 'validation failed'))[:600]}"
                 )
-                prior_feedback = (f"{recovery}\n\n{prior_feedback}"
-                                  if prior_feedback else recovery)
             elif prior_feedback and not last.get("accepted", True):
                 prior_feedback += "\n(Your last episode's changes were not kept.)"
     pending = (
@@ -463,12 +475,21 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
                 r["name"]: EvalResult(**r) for r in (eval_history[-1].get("results") or [])
             }
             prior_feedback = cfg.goal.observe_feedback(last_results)
-        prior_feedback = _repair_feedback(pending, prior_feedback)
+        repair_notice = _repair_notice(pending)
+    handoffs = None
+    if getattr(cfg.adapter, "continuity_mode", "native") == "framework":
+        from proteus.core.continuity import HandoffStore
+        handoffs = HandoffStore(cfg.root)
     error = ""
     done = start
     last_checkpoint = snapshot.head(harness)  # gapless episode mapping, including rollbacks
     last_accepted = last_checkpoint            # same valid tree at start/resume
     for ep in range(start + 1, cfg.episodes + 1):
+        if handoffs is not None:
+            if repair_notice:
+                handoffs.set_controller_notice(repair_notice)
+            else:
+                handoffs.clear_controller_notice()
         active_root = None
         if staged_activation:
             # Keep the executable snapshot outside both the writable candidate and the
@@ -486,7 +507,7 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
                 snapshot.restore(harness, pending["commit"])
         spec = EpisodeSpec(
             root=cfg.root, episode=ep, model=cfg.model,
-            phase_prompts=_phase_prompts(cfg, prior_feedback),
+            phase_prompts=_phase_prompts(cfg, prior_feedback, repair_notice),
             max_turns=cfg.max_turns, seed=cfg.seed,
             min_turns_per_phase=cfg.min_turns_per_phase,
             phase_turns=dict(cfg.phase_turns), hard_max_turns=cfg.hard_max_turns,
@@ -598,12 +619,18 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
                 cfg.root, commit=candidate_commit, resume_episode=ep + 1,
                 reason="viability", error=viability_error,
             )
+            repair_notice = _repair_notice(pending)
+            if handoffs is not None:
+                handoffs.set_controller_notice(repair_notice)
         else:
             # Accepted evolution advances the active line. A valid but lower-scoring
             # selection rejection deliberately starts over from last-valid rather than
             # inheriting a candidate the configured outer loop rejected.
             pending = None
             _clear_pending_candidate(cfg.root)
+            repair_notice = ""
+            if handoffs is not None:
+                handoffs.clear_controller_notice()
         checkpoint_fingerprint = cfg.adapter.disposition_fingerprint(harness)
         done = ep
         for key, value in (res.counters or {}).items():
@@ -626,16 +653,11 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
         _write_json_atomic(history_path, eval_history)
         prior_feedback = cfg.goal.observe_feedback(by_name)  # OBSERVE-visible only
         if viability_error:
-            if pending:
-                prior_feedback = _repair_feedback(pending, prior_feedback)
-            else:
-                recovery = (
+            if not pending:
+                repair_notice = (
                     "Your last candidate failed the episode-boundary viability gate and "
                     "was rolled back. Fix the underlying issue in a new candidate: "
                     f"{viability_error[:600]}"
-                )
-                prior_feedback = (
-                    f"{recovery}\n\n{prior_feedback}" if prior_feedback else recovery
                 )
         elif prior_feedback and not accepted:
             prior_feedback += "\n(Your last episode's changes were not kept.)"

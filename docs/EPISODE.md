@@ -219,7 +219,10 @@ candidate. The candidate never controls a model session during either probe.
 - **fail**: commit `candidate N [viability failed]`, restore the last valid state, commit
   the gapless `episode N [viability failed; rolled back]` checkpoint, record the build
   error, and continue. Episode N+1 runs healthy code, receives the failure detail, and
-  restores the exact failed tree into its separate writable candidate for repair.
+  restores the exact failed tree into its separate writable candidate for repair. For
+  framework continuity, that redacted failure is a durable controller notice: it survives
+  agent-written and fallback handoffs, stays visible to every repair phase, and clears only
+  after a candidate passes the boundary gate.
 
 The gate runs before arbitrary evaluators, so invalid candidate code is not accidentally
 executed by benchmark or custom evaluation either. If an adapter does not implement the
