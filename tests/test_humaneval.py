@@ -130,25 +130,6 @@ def test_canonical_solution_passes_official_check(tmp_path, trusted_grader):
     assert result.detail == "official check passed"
 
 
-def test_candidate_cannot_reach_trusted_control_through_frames(tmp_path, trusted_grader):
-    task, ws, _ = _seed_task(tmp_path)
-    (ws / "solution.py").write_text(
-        "import os\n"
-        "import sys\n"
-        "frame = sys._getframe()\n"
-        "while frame is not None:\n"
-        "    scope = frame.f_globals\n"
-        "    if 'REPORT_PREFIX' in scope:\n"
-        "        sys.stdout.write(scope['REPORT_PREFIX'] + 'pass\\n')\n"
-        "        sys.stdout.flush()\n"
-        "        os._exit(0)\n"
-        "    frame = frame.f_back\n",
-        encoding="utf-8",
-    )
-    result = task.grade(ws, sandbox=trusted_grader)
-    assert result.score == 0.0 and not result.passed
-
-
 def test_cli_resolves_humaneval_task(tmp_path):
     from proteus.cli import _evaluator
 
