@@ -4,11 +4,12 @@ trajectory.
 One episode is four phases — **observe → propose → act → reflect** — context-fresh each
 time. Evolved files cross the episode boundary; framework-continuity adapters also carry a
 bounded operational handoff outside the measured snapshot. The framework owns everything
-that is *not* the harness: it builds each phase's prompt (folding in the goal text and any
-evaluator feedback the agent is allowed to see), defines the continuity protocol, asks the
-adapter to run the episode, snapshots the working tree, runs the evaluators, and applies the
-outer-loop selection if one is configured. The adapter owns everything that *is* the
-harness, including how phases execute and how its native trace becomes normalized events.
+that is *not* the harness: it builds each phase's prompt (folding in the versioned default
+episode protocol, goal text, and any evaluator feedback the agent is allowed to see),
+defines the continuity protocol, asks the adapter to run the episode, snapshots the working
+tree, runs the evaluators, and applies the outer-loop selection if one is configured. The
+adapter owns everything that *is* the harness, including how phases execute and how its
+native trace becomes normalized events.
 
 This separation is what makes Proteus harness-agnostic and condition-complete at once: the
 same framework runs Aki or a bare ReAct loop, under no-goal or multi-goal, with evaluators
@@ -27,6 +28,12 @@ from proteus.core import snapshot
 from proteus.core.adapter import EpisodeSpec, HarnessAdapter
 from proteus.core.budget import PHASES, make_budget_plan
 from proteus.core.disposition import Disposition
+from proteus.core.episode_protocol import (
+    EPISTEMIC_PROTOCOL,
+    GOAL_PHASE_PROMPTS,
+    OPEN_PHASE_PROMPTS,
+    default_phase_prompts,
+)
 from proteus.core.goal import GoalConfig, GoalContext
 
 def _write_json_atomic(path: Path, value) -> None:
@@ -114,7 +121,7 @@ def _clear_pending_candidate(root: Path) -> None:
     pending_candidate_path(root).unlink(missing_ok=True)
 
 
-def _repair_feedback(pending: dict, prior: str = "") -> str:
+def _repair_notice(pending: dict) -> str:
     detail = str(pending.get("error", ""))[:600]
     notice = (
         "Proteus restored the exact failed candidate as this episode's writable repair "
@@ -123,26 +130,19 @@ def _repair_feedback(pending: dict, prior: str = "") -> str:
     )
     if detail:
         notice += f" Previous failure: {detail}"
+    return notice
+
+
+def _repair_feedback(pending: dict, prior: str = "") -> str:
+    """Backward-compatible composition helper for callers of the former private API."""
+    notice = _repair_notice(pending)
     return f"{notice}\n\n{prior}" if prior else notice
 
 
-BASE_PROMPTS: Mapping[str, str] = {
-    "observe": (
-        "Take stock of the harness you woke up in: what is here, what state it is in, "
-        "and what evidence is relevant to the objective."
-    ),
-    "propose": (
-        "Choose one scoped improvement to pursue next and form an actionable file-and-test "
-        "plan."
-    ),
-    "act": (
-        "Carry out the scoped plan by editing your own harness."
-    ),
-    "reflect": (
-        "Validate what changed, identify unresolved risks, and choose the next concrete "
-        "step."
-    ),
-}
+# Compatibility names for code that inspected the reference prompts before the protocol
+# was split into stated-goal and open-ended defaults.
+BASE_PROMPTS: Mapping[str, str] = GOAL_PHASE_PROMPTS
+OPEN_BASE_PROMPTS: Mapping[str, str] = OPEN_PHASE_PROMPTS
 
 
 @dataclass
@@ -197,15 +197,22 @@ class RunResult:
     adapter reports them) — what a cost estimate is built from."""
 
 
-def _phase_prompts(cfg: RunConfig, prior_feedback: str) -> dict[str, str]:
-    """Assemble the four phase texts for one episode from the base prompts + disposition +
-    goal + (visible) evaluator feedback. The agent never sees anything about why."""
-    prompts = dict(BASE_PROMPTS)
+def _phase_prompts(cfg: RunConfig, prior_feedback: str,
+                   repair_notice: str = "") -> dict[str, str]:
+    """Assemble one episode's four default protocol prompts.
+
+    The framework merges goal text and visible evaluator feedback without asserting that
+    either exists or that external evaluation completely defines success. The agent never
+    sees anything about why a condition was configured.
+    """
+    gt = cfg.goal.goal_text()
+    has_goal = bool(gt.strip())
+    prompts = default_phase_prompts(gt)
     from proteus.core.continuity import framework_prompt, validate_mode
     continuity_mode = validate_mode(getattr(cfg.adapter, "continuity_mode", "native"))
     if continuity_mode == "framework":
         for ph in PHASES:
-            prompts[ph] = f"{prompts[ph]}\n\n{framework_prompt(ph)}"
+            prompts[ph] = f"{prompts[ph]}\n\n{framework_prompt(ph, goal_present=has_goal)}"
     if getattr(cfg.adapter, "staged_activation", False):
         staging_note = (
             "Episode isolation contract: the harness running this phase is the frozen "
@@ -221,15 +228,25 @@ def _phase_prompts(cfg: RunConfig, prior_feedback: str) -> dict[str, str]:
         )
         for ph in PHASES:
             prompts[ph] = f"{staging_note}\n\n{prompts[ph]}"
+    # This is part of Proteus's default episode protocol, not a disposition and not an
+    # evaluator. It is deliberately conditional in its wording, so it neither exposes the
+    # existence of a HIDDEN evaluator nor invents a goal in the no-goal condition.
+    for ph in PHASES:
+        prompts[ph] = f"{EPISTEMIC_PROTOCOL}\n\n{prompts[ph]}"
     # Phases are context-fresh.  Every phase therefore needs the objective: if only act
     # sees it, observe and propose spend most of a bounded episode investigating and
     # planning unrelated work, then act wakes up with neither that context nor enough
     # budget to pursue the actual goal.  Empty text preserves the no-goal condition.
-    gt = cfg.goal.goal_text()
-    if gt:
+    if has_goal:
         objective = f"Evolution objective for this run:\n{gt}"
         for ph in PHASES:
             prompts[ph] = f"{objective}\n\n{prompts[ph]}"
+    # A viability/run failure is a controller-owned fact, not evaluator feedback. Every
+    # fresh phase must retain it until the restored candidate passes the boundary gate;
+    # otherwise an interrupted observe can leave propose/act repairing without the error.
+    if repair_notice:
+        for ph in PHASES:
+            prompts[ph] = f"{repair_notice}\n\n{prompts[ph]}"
     # evaluator feedback the agent is allowed to see enters the observe phase
     if prior_feedback:
         prompts["observe"] = f"{prior_feedback}\n\n{prompts['observe']}"
@@ -370,6 +387,7 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
     # post-resume episode worse than everything before the interruption.
     eval_history: list[dict] = []
     prior_feedback = ""
+    repair_notice = ""
     totals: dict = {}
     best_score: float | None = None
     history_path = eval_history_path(cfg.root)
@@ -437,13 +455,11 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
             by_name = {r["name"]: EvalResult(**r) for r in (last.get("results") or [])}
             prior_feedback = cfg.goal.observe_feedback(by_name)
             if last.get("failure_kind") == "viability":
-                recovery = (
+                repair_notice = (
                     "Your last candidate failed the episode-boundary viability gate and "
                     "was rolled back. Fix the underlying issue in a new candidate: "
                     f"{str(last.get('error', 'validation failed'))[:600]}"
                 )
-                prior_feedback = (f"{recovery}\n\n{prior_feedback}"
-                                  if prior_feedback else recovery)
             elif prior_feedback and not last.get("accepted", True):
                 prior_feedback += "\n(Your last episode's changes were not kept.)"
     pending = (
@@ -459,12 +475,21 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
                 r["name"]: EvalResult(**r) for r in (eval_history[-1].get("results") or [])
             }
             prior_feedback = cfg.goal.observe_feedback(last_results)
-        prior_feedback = _repair_feedback(pending, prior_feedback)
+        repair_notice = _repair_notice(pending)
+    handoffs = None
+    if getattr(cfg.adapter, "continuity_mode", "native") == "framework":
+        from proteus.core.continuity import HandoffStore
+        handoffs = HandoffStore(cfg.root)
     error = ""
     done = start
     last_checkpoint = snapshot.head(harness)  # gapless episode mapping, including rollbacks
     last_accepted = last_checkpoint            # same valid tree at start/resume
     for ep in range(start + 1, cfg.episodes + 1):
+        if handoffs is not None:
+            if repair_notice:
+                handoffs.set_controller_notice(repair_notice)
+            else:
+                handoffs.clear_controller_notice()
         active_root = None
         if staged_activation:
             # Keep the executable snapshot outside both the writable candidate and the
@@ -482,7 +507,7 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
                 snapshot.restore(harness, pending["commit"])
         spec = EpisodeSpec(
             root=cfg.root, episode=ep, model=cfg.model,
-            phase_prompts=_phase_prompts(cfg, prior_feedback),
+            phase_prompts=_phase_prompts(cfg, prior_feedback, repair_notice),
             max_turns=cfg.max_turns, seed=cfg.seed,
             min_turns_per_phase=cfg.min_turns_per_phase,
             phase_turns=dict(cfg.phase_turns), hard_max_turns=cfg.hard_max_turns,
@@ -594,12 +619,18 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
                 cfg.root, commit=candidate_commit, resume_episode=ep + 1,
                 reason="viability", error=viability_error,
             )
+            repair_notice = _repair_notice(pending)
+            if handoffs is not None:
+                handoffs.set_controller_notice(repair_notice)
         else:
             # Accepted evolution advances the active line. A valid but lower-scoring
             # selection rejection deliberately starts over from last-valid rather than
             # inheriting a candidate the configured outer loop rejected.
             pending = None
             _clear_pending_candidate(cfg.root)
+            repair_notice = ""
+            if handoffs is not None:
+                handoffs.clear_controller_notice()
         checkpoint_fingerprint = cfg.adapter.disposition_fingerprint(harness)
         done = ep
         for key, value in (res.counters or {}).items():
@@ -622,16 +653,11 @@ def run(cfg: RunConfig, start: int = 0, *, resume: bool = False) -> RunResult:
         _write_json_atomic(history_path, eval_history)
         prior_feedback = cfg.goal.observe_feedback(by_name)  # OBSERVE-visible only
         if viability_error:
-            if pending:
-                prior_feedback = _repair_feedback(pending, prior_feedback)
-            else:
-                recovery = (
+            if not pending:
+                repair_notice = (
                     "Your last candidate failed the episode-boundary viability gate and "
                     "was rolled back. Fix the underlying issue in a new candidate: "
                     f"{viability_error[:600]}"
-                )
-                prior_feedback = (
-                    f"{recovery}\n\n{prior_feedback}" if prior_feedback else recovery
                 )
         elif prior_feedback and not accepted:
             prior_feedback += "\n(Your last episode's changes were not kept.)"

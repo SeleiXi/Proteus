@@ -107,8 +107,9 @@ salience — and the prompt copy sits outside `F`, so it is neither removable no
 `disposition_fingerprint`, which is what the attribution argument rests on.
 
 ### 4. Run one episode, emit the trace
-`run_episode(spec)` executes the four phases (`spec.phase_prompts` carries goal text and
-visible evaluator feedback already merged). `read_trace` returns normalized `ActionEvent`s
+`run_episode(spec)` executes the four phases (`spec.phase_prompts` carries the versioned
+default epistemic protocol, goal text, and visible evaluator feedback already merged).
+`read_trace` returns normalized `ActionEvent`s
 — the only behaviour channel Proteus reads; never self-report. An external harness's own
 logs are the source of truth: parse them rather than adding measurement instrumentation to
 the harness. Evolving its run-local source is the subject's action, not instrumentation.
@@ -283,8 +284,10 @@ natively —
    fresh container. This catches stale lockfiles, missing package links, newly added package
    outputs omitted from a cache, and plugin-load failures before activation. A failed
    candidate cannot activate: the active line rolls back and remains healthy, while the
-   exact failed tree is restored as episode N+1's writable repair candidate. A passing
-   candidate first runs as the controlling harness one episode later.
+   exact failed tree is restored as episode N+1's writable repair candidate. Its redacted
+   gate failure persists as a framework controller notice across every repair phase and
+   fallback until the repair passes. A passing candidate first runs as the controlling
+   harness one episode later.
 
 Verified live for both harnesses: a marker written into the real TypeScript entry point
 (`packages/coding-agent/src/cli.ts` for pi, `apps/cli/src/bin.ts` for dsh) appears on the

@@ -111,12 +111,25 @@ def test_staged_candidate_is_frozen_until_next_episode_and_bad_build_rolls_back(
 
     class StagedHarness(MinimalHarness):
         staged_activation = True
+        continuity_mode = "framework"
 
         def __init__(self):
             super().__init__()
             self.active_observations = []
+            self.prompts = []
+            self.handoffs = []
 
         def run_episode(self, spec):
+            from proteus.core.continuity import HandoffStore
+
+            self.prompts.append(dict(spec.phase_prompts))
+            visible = {}
+            store = HandoffStore(spec.root)
+            for phase in ("observe", "propose", "act", "reflect"):
+                handoff = store.begin(spec.episode, phase)
+                visible[phase] = store.current.read_text()
+                store.finish(handoff, interrupted=True)
+            self.handoffs.append(visible)
             active = Path(spec.active_root)
             candidate = spec.root / "harness"
             self.active_observations.append({
@@ -160,6 +173,18 @@ def test_staged_candidate_is_frozen_until_next_episode_and_bad_build_rolls_back(
          "broken_after_act": False},
         {"episode": 2, "broken_before": False, "candidate_broken_before": True},
     ]
+    assert all(
+        "compile failed: BROKEN" in adapter.prompts[1][phase]
+        for phase in ("observe", "propose", "act", "reflect")
+    ), "a restored candidate's gate error was not visible to every fresh repair phase"
+    assert all(
+        "compile failed: BROKEN" in adapter.handoffs[1][phase]
+        for phase in ("observe", "propose", "act", "reflect")
+    ), "a fallback handoff dropped the controller-owned gate error"
+    assert not (root / ".proteus-state" / "controller-notice.md").exists()
+    assert "compile failed: BROKEN" not in (
+        root / ".proteus-state" / "latest.md"
+    ).read_text(), "a successful repair left a stale controller notice"
     assert not result.eval_history[0]["accepted"]
     assert result.eval_history[0]["failure_kind"] == "viability"
     assert "compile failed" in result.eval_history[0]["error"]
@@ -520,6 +545,7 @@ def test_second_sweep_into_the_same_root_refuses(tmp_path):
 def test_sweep_manifest_records_the_model(tmp_path):
     import json
     from proteus import __version__
+    from proteus.core import DEFAULT_EPISODE_PROTOCOL_VERSION
     from proteus.sweep import run_sweep
 
     root = tmp_path / "out"
@@ -527,6 +553,8 @@ def test_sweep_manifest_records_the_model(tmp_path):
     manifest = json.loads((root / "manifest.json").read_text())
     assert manifest["model"] == "mock"
     assert manifest["condition"]["proteus_version"] == __version__
+    assert manifest["condition"]["default_episode_protocol_version"] == \
+        DEFAULT_EPISODE_PROTOCOL_VERSION
     assert "budget" not in manifest
     assert "budget_protocol" not in manifest["condition"]
 
