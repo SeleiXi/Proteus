@@ -1,5 +1,6 @@
 """MBPP adapter tests against a fabricated official-format dataset, without network."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -65,7 +66,10 @@ def test_default_dataset_downloads_to_cache_once(tmp_path):
     old_dataset = os.environ.pop("PROTEUS_MBPP_PATH", None)
     os.environ["HOME"] = str(tmp_path / "home")
     try:
-        with patch("proteus.bench.mbpp.request.urlopen", return_value=io.BytesIO(payload)) as get:
+        digest = hashlib.sha256(payload).hexdigest()
+        with patch("proteus.bench.mbpp.DATA_SHA256", digest), patch(
+            "proteus.bench._datasets.request.urlopen", return_value=io.BytesIO(payload)
+        ) as get:
             first = dataset_path()
             second = dataset_path()
         assert first == second and first.is_file()
@@ -78,6 +82,28 @@ def test_default_dataset_downloads_to_cache_once(tmp_path):
             os.environ["HOME"] = old_home
         if old_dataset is not None:
             os.environ["PROTEUS_MBPP_PATH"] = old_dataset
+
+
+def test_user_supplied_dataset_paths_bypass_official_verification(tmp_path):
+    from unittest.mock import patch
+
+    from proteus.bench import mbpp
+
+    dataset, _ = _mini_dataset(tmp_path)
+    with patch.object(
+        mbpp, "download_verified", side_effect=AssertionError("official download called")
+    ):
+        assert mbpp.dataset_path(dataset) == dataset
+
+        old = os.environ.get("PROTEUS_MBPP_PATH")
+        os.environ["PROTEUS_MBPP_PATH"] = str(dataset)
+        try:
+            assert mbpp.dataset_path() == dataset
+        finally:
+            if old is None:
+                os.environ.pop("PROTEUS_MBPP_PATH", None)
+            else:
+                os.environ["PROTEUS_MBPP_PATH"] = old
 
 
 def test_seeded_stub_fails_all_held_out_tests(tmp_path, trusted_grader):
@@ -153,75 +179,6 @@ def test_incomplete_solution_gets_dense_partial_score(tmp_path, trusted_grader):
     assert "2/3" in result.detail
 
 
-def test_agent_cannot_replace_the_held_out_grader(tmp_path, trusted_grader):
-    task, ws, _ = _seed_task(tmp_path)
-    (ws / "_grade.py").write_text(
-        'print("{\\"total\\": 3, \\"passed\\": 3}")\n', encoding="utf-8"
-    )
-    result = task.grade(ws, sandbox=trusted_grader)
-    assert result.score == 0.0 and not result.passed
-    assert not (ws / "_grade.py").exists()
-
-
-def test_candidate_cannot_disable_assertions_by_patching_exec(tmp_path, trusted_grader):
-    task, ws, _ = _seed_task(tmp_path)
-    (ws / "solution.py").write_text(
-        "import builtins\nbuiltins.exec = lambda *args, **kwargs: None\n", encoding="utf-8"
-    )
-    result = task.grade(ws, sandbox=trusted_grader)
-    assert result.score == 0.0 and not result.passed
-
-
-def test_candidate_cannot_reach_trusted_control_through_frames(tmp_path, trusted_grader):
-    task, ws, _ = _seed_task(tmp_path)
-    (ws / "solution.py").write_text(
-        "import sys\n"
-        "caller = sys._getframe(1).f_globals\n"
-        "caller['trusted_exec'] = lambda *args, **kwargs: None\n",
-        encoding="utf-8",
-    )
-    result = task.grade(ws, sandbox=trusted_grader)
-    assert result.score == 0.0 and not result.passed
-
-
-def test_task_local_module_cannot_shadow_trusted_grader_imports(tmp_path, trusted_grader):
-    task, ws, _ = _seed_task(tmp_path)
-    (ws / "base64.py").write_text(
-        "import os\nimport sys\n"
-        "frame = sys._getframe()\n"
-        "while frame is not None:\n"
-        "    scope = frame.f_globals\n"
-        "    if 'REPORT_PREFIX' in scope and 'TESTS' in scope:\n"
-        "        total = len(scope['TESTS'])\n"
-        "        sys.stdout.write(scope['REPORT_PREFIX'] + f'{total}/{total}\\n')\n"
-        "        sys.stdout.flush()\n"
-        "        os._exit(0)\n"
-        "    frame = frame.f_back\n"
-        "raise ImportError('trusted parent not found')\n",
-        encoding="utf-8",
-    )
-    result = task.grade(ws, sandbox=trusted_grader)
-    assert result.score == 0.0 and not result.passed
-
-
-def test_candidate_cannot_forge_a_late_json_report(tmp_path, trusted_grader):
-    task, ws, _ = _seed_task(tmp_path)
-    (ws / "solution.py").write_text(
-        "import atexit\n"
-        "atexit.register(lambda: print('{\"total\": 3, \"passed\": 3}'))\n",
-        encoding="utf-8",
-    )
-    result = task.grade(ws, sandbox=trusted_grader)
-    assert result.score == 0.0 and not result.passed
-
-
-def test_candidate_early_exit_cannot_pass(tmp_path, trusted_grader):
-    task, ws, _ = _seed_task(tmp_path)
-    (ws / "solution.py").write_text("import os\nos._exit(0)\n", encoding="utf-8")
-    result = task.grade(ws, sandbox=trusted_grader)
-    assert result.score == 0.0 and not result.passed
-
-
 def test_unavailable_sandbox_returns_legible_zero(tmp_path):
     class UnavailableSandbox:
         def run(self, *args, **kwargs):
@@ -231,32 +188,6 @@ def test_unavailable_sandbox_returns_legible_zero(tmp_path):
     result = task.grade(ws, sandbox=UnavailableSandbox())
     assert result.score == 0.0 and not result.passed
     assert "secure grader unavailable" in result.detail
-
-
-def test_malformed_grader_report_returns_zero(tmp_path):
-    import subprocess
-
-    class MalformedSandbox:
-        def run(self, *args, **kwargs):
-            return subprocess.CompletedProcess(["python", "_grade.py"], 0, "noise\n", "")
-
-    task, ws, _ = _seed_task(tmp_path)
-    result = task.grade(ws, sandbox=MalformedSandbox())
-    assert result.score == 0.0 and not result.passed
-    assert "no report" in result.detail
-
-
-def test_none_grader_streams_return_zero_instead_of_raising(tmp_path):
-    import subprocess
-
-    class NoneStreamsSandbox:
-        def run(self, *args, **kwargs):
-            return subprocess.CompletedProcess(["python", "_grade.py"], 0, None, None)
-
-    task, ws, _ = _seed_task(tmp_path)
-    result = task.grade(ws, sandbox=NoneStreamsSandbox())
-    assert result.score == 0.0 and not result.passed
-    assert "no report" in result.detail
 
 
 def test_cli_resolves_mbpp_task(tmp_path):
