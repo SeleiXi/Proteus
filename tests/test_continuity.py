@@ -48,6 +48,41 @@ def test_fallback_uses_normalized_actions_not_reasoning_or_results(tmp_path):
     assert "interrupted" in record["content"]
 
 
+def test_controller_notice_survives_fallback_and_agent_omission_until_cleared(tmp_path):
+    store = HandoffStore(tmp_path)
+    store.set_controller_notice(
+        "Restored failed candidate. Previous failure: compile failed: missing baseURL. "
+        "api_key=sk-abcdefghijklmnop"
+    )
+
+    observe = store.begin(2, "observe")
+    exposed = store.current.read_text()
+    assert "missing baseURL" in exposed
+    assert "sk-abcdefghijklmnop" not in exposed
+
+    fallback = store.finish(observe, [
+        ActionEvent(turn=1, phase="observe", tool="read",
+                    params={"file_path": "/workspace/candidate/src/config.ts"}),
+    ], interrupted=True)
+    assert fallback["controller_notice"] is True
+    assert "missing baseURL" in fallback["content"]
+
+    propose = store.begin(2, "propose")
+    assert "missing baseURL" in propose.previous
+    # Even an explicit handoff that forgets the framework fact cannot clear it.
+    store.current.write_text("# Findings\nScoped repair planned.\n", encoding="utf-8")
+    explicit = store.finish(propose)
+    assert explicit["source"] == "agent"
+    assert "missing baseURL" in explicit["content"]
+
+    assert "missing baseURL" in store.begin(2, "act").previous
+    store.clear_controller_notice()
+    assert not store.controller_notice.exists()
+    assert "missing baseURL" not in store.latest.read_text()
+    assert "missing baseURL" not in store.current.read_text()
+    assert "missing baseURL" not in store.begin(3, "observe").previous
+
+
 def test_reflect_handoff_crosses_the_episode_boundary_with_history(tmp_path):
     store = HandoffStore(tmp_path)
     reflect = store.begin(1, "reflect")

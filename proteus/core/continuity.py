@@ -22,7 +22,7 @@ from typing import Sequence
 
 from proteus.core.adapter import ActionEvent
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 MODES = frozenset({"native", "framework", "none"})
 # Containerized coding harnesses commonly restrict writes to /workspace.  The host source
 # is still `<run>/harness`, while adapters bind this external directory over the nested
@@ -31,6 +31,9 @@ CONTAINER_ROOT = "/workspace/.proteus"
 CONTAINER_HANDOFF = f"{CONTAINER_ROOT}/handoff.md"
 MAX_CONTENT_CHARS = 12_000
 MAX_PRIOR_CHARS = 6_000
+MAX_CONTROLLER_NOTICE_CHARS = 3_000
+CONTROLLER_NOTICE_START = "<!-- proteus-controller-notice:start -->"
+CONTROLLER_NOTICE_END = "<!-- proteus-controller-notice:end -->"
 
 _SECRET_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
@@ -88,6 +91,39 @@ def _clip(text: str, limit: int = MAX_CONTENT_CHARS) -> str:
     return "[earlier handoff content omitted]\n\n" + text[-limit:]
 
 
+def _strip_controller_notice(text: str) -> str:
+    """Remove framework-owned notices before replacing or clearing one."""
+    pattern = re.compile(
+        rf"{re.escape(CONTROLLER_NOTICE_START)}.*?"
+        rf"{re.escape(CONTROLLER_NOTICE_END)}",
+        re.DOTALL,
+    )
+    return pattern.sub("", text).strip()
+
+
+def _with_controller_notice(text: str, notice: str) -> str:
+    """Compose one durable controller notice with an agent/fallback handoff.
+
+    The notice is kept in a separately owned file, so an agent that replaces
+    ``handoff.md`` cannot accidentally discard a still-active boundary failure. Markers
+    make repeated phase transitions idempotent and let a successful repair remove stale
+    notices from the live handoff without rewriting archived history.
+    """
+    base = _strip_controller_notice(text)
+    clean_notice = _clip(notice, MAX_CONTROLLER_NOTICE_CHARS) if notice.strip() else ""
+    if not clean_notice:
+        return _clip(base)
+    block = (
+        f"{CONTROLLER_NOTICE_START}\n"
+        "# Proteus controller notice\n\n"
+        f"{clean_notice}\n"
+        f"{CONTROLLER_NOTICE_END}"
+    )
+    remaining = max(1_000, MAX_CONTENT_CHARS - len(block) - 2)
+    clipped_base = _clip(base, remaining) if base else ""
+    return f"{block}\n\n{clipped_base}" if clipped_base else block
+
+
 def _event_detail(event: ActionEvent) -> str:
     preferred = ("file_path", "path", "pattern", "query", "command")
     detail = next((str(event.params[k]) for k in preferred if event.params.get(k)), "")
@@ -129,18 +165,58 @@ class HandoffStore:
         self.history = self.root / "handoffs"
         self.current = self.root / "handoff.md"
         self.latest = self.root / "latest.md"
+        self.controller_notice = self.root / "controller-notice.md"
 
     def initialise(self) -> None:
         self.history.mkdir(parents=True, exist_ok=True)
         meta = self.root / "continuity.json"
-        if not meta.exists():
-            self._atomic_text(meta, json.dumps({
-                "protocol": "proteus-phase-continuity",
-                "version": PROTOCOL_VERSION,
-                "mode": "framework",
-                "container_handoff": CONTAINER_HANDOFF,
-                "persists_raw_reasoning": False,
-            }, indent=2) + "\n")
+        desired = {
+            "protocol": "proteus-phase-continuity",
+            "version": PROTOCOL_VERSION,
+            "mode": "framework",
+            "container_handoff": CONTAINER_HANDOFF,
+            "persists_raw_reasoning": False,
+            "persistent_controller_notices": True,
+        }
+        try:
+            current = json.loads(meta.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            current = None
+        if current != desired:
+            self._atomic_text(meta, json.dumps(desired, indent=2) + "\n")
+
+    def set_controller_notice(self, notice: str) -> None:
+        """Persist a redacted framework fact across phases until explicitly cleared."""
+        self.initialise()
+        clean = _clip(notice, MAX_CONTROLLER_NOTICE_CHARS)
+        if not clean:
+            self.clear_controller_notice()
+            return
+        self._atomic_text(self.controller_notice, clean + "\n")
+        self._sync_live_notice(clean)
+
+    def clear_controller_notice(self) -> None:
+        """Clear a resolved notice from live continuity while preserving history."""
+        self.initialise()
+        self.controller_notice.unlink(missing_ok=True)
+        self._sync_live_notice("")
+
+    def _read_controller_notice(self) -> str:
+        try:
+            return _clip(
+                self.controller_notice.read_text(encoding="utf-8"),
+                MAX_CONTROLLER_NOTICE_CHARS,
+            )
+        except OSError:
+            return ""
+
+    def _sync_live_notice(self, notice: str) -> None:
+        for path in (self.latest, self.current):
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            self._atomic_text(path, _with_controller_notice(content, notice) + "\n")
 
     def begin(self, episode: int, phase: str) -> HandoffStart:
         """Expose the latest archived handoff and return a modification baseline."""
@@ -152,7 +228,7 @@ class HandoffStore:
                 "No prior phase has run. Inspect the current harness and write the first "
                 "handoff before this phase ends.\n"
             )
-        previous = _clip(previous)
+        previous = _with_controller_notice(previous, self._read_controller_notice())
         self._atomic_text(self.current, previous + ("\n" if previous else ""))
         digest = hashlib.sha256(self.current.read_bytes()).hexdigest()
         return HandoffStart(episode, phase, previous, digest)
@@ -194,6 +270,8 @@ class HandoffStore:
         content = _clip(current) if explicit else fallback_handoff(
             start.previous, events, interrupted
         )
+        notice = self._read_controller_notice()
+        content = _with_controller_notice(content, notice)
         calls = [_event_detail(event) for event in events if event.tool][-30:]
         phase_dir = self.history / f"ep{start.episode:03d}"
         phase_dir.mkdir(parents=True, exist_ok=True)
@@ -208,6 +286,7 @@ class HandoffStore:
             "attempt": attempt,
             "source": "agent" if explicit else "framework-fallback",
             "interrupted": bool(interrupted),
+            "controller_notice": bool(notice),
             "content": content,
             "tool_calls": calls,
         }
