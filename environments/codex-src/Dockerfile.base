@@ -1,0 +1,16 @@
+# Build context: an exact pinned checkout/archive of https://github.com/openai/codex.
+FROM rust:1.98-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      pkg-config libssl-dev clang cmake git \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . .
+ENV CARGO_BUILD_JOBS=1 CARGO_NET_GIT_FETCH_WITH_CLI=true
+# The attribute only raises rustc's compile-time query limit. Restore the official
+# source bytes after building so the image still carries an exact upstream snapshot.
+RUN cp codex-rs/cli/src/main.rs /tmp/main.rs.upstream \
+ && sed -i '1i#![recursion_limit = "256"]' codex-rs/cli/src/main.rs \
+ && cargo build --manifest-path codex-rs/Cargo.toml -p codex-cli \
+      --release --bin codex \
+ && cp /tmp/main.rs.upstream codex-rs/cli/src/main.rs
+ENTRYPOINT ["/src/codex-rs/target/release/codex"]

@@ -23,9 +23,14 @@ if [ -d /workspace/src/codex-rs ]; then
             BUILD=/state/build-$HASH
             mkdir -p "$BUILD"
             rsync -a --delete --exclude codex-rs/target /workspace/src/ "$BUILD/"
+            # This pinned snapshot exceeds rustc 1.98's default query depth while
+            # monomorphising cli/main.rs. The crate attribute is build apparatus in the
+            # disposable copy; the measured candidate remains byte-for-byte untouched.
+            sed -i '1i#![recursion_limit = "256"]' "$BUILD/codex-rs/cli/src/main.rs"
             if ! (cd "$BUILD" && CARGO_HOME=/usr/local/cargo CARGO_NET_OFFLINE=true \
                     CARGO_TARGET_DIR=/state/cargo-target CARGO_BUILD_JOBS=1 \
-                    cargo build --manifest-path codex-rs/Cargo.toml -p codex-cli --release \
+                    cargo build --manifest-path codex-rs/Cargo.toml -p codex-cli \
+                    --release --bin codex \
                     > /state/last-build.log 2>&1); then
                 echo "self-edited Codex source does not build:" >&2
                 tail -40 /state/last-build.log >&2
