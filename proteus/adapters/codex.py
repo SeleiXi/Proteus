@@ -188,6 +188,7 @@ class CodexHarness:
             handoff_start = handoffs.begin(spec.episode, phase)
             trace = self._trace_path(run_root, spec.episode, phase)
             args = ["--proteus-trace", f"/records/{trace.name}",
+                    "-c", "features.code_mode_host=false",
                     "exec", "--json", "--sandbox", "workspace-write",
                     "--skip-git-repo-check", "--ephemeral", "-C", "/workspace"]
             chosen_model = spec.model or self.model
