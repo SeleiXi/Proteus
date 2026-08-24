@@ -32,7 +32,7 @@ proteus measure --harness mypkg.theirs_adapter:TheirsHarness --out runs/theirs -
 If the repo ships no Dockerfile, `proteus env scaffold --local-dockerfile` writes a wrapper
 stub under `environments/<name>/` that is built with the repo checkout as its context. Put
 the runtime the harness needs there. For a harness whose own source will be evolvable, use
-`environments/dsh-src/` and `environments/pi-src/` as the stronger reference: the build
+`environments/dsh-src/`, `environments/pi-src/`, and `environments/codex-src/` as the stronger reference: the build
 context is the pinned upstream checkout, and the image carries its source, dependencies,
 build toolchain, and exact-tree boot wrapper.
 
@@ -62,7 +62,7 @@ The built-ins cover the two main integration shapes:
   in-process): start from `proteus/adapters/minimal.py` (~140 lines).
 - **External, source-evolving CLI** — the upstream repository stays pinned and untouched,
   but each run receives an evolvable copy of its real source: start from
-  `proteus/adapters/dsh.py` or `pi.py`. Each episode boots a frozen last-valid copy while
+  `proteus/adapters/dsh.py`, `pi.py`, or `codex.py`. Each episode boots a frozen last-valid copy while
   the model writes a separate candidate; Proteus rebuilds and validates that candidate
   only after reflect. The disposition installs as a removable marked block in `AGENTS.md`,
   and the trace is parsed from the harness's own session logs. A workspace-only CLI

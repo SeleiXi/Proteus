@@ -4,7 +4,7 @@
 
 1. **Manifest-backed environments** — an `environment.toml` names a local Dockerfile tag or
    a published `docker_image`. `proteus env build <name>` resolves and builds this shape.
-2. **Source-mode environments** — `dsh-src/` and `pi-src/` are built with a pinned upstream
+2. **Source-mode environments** — `dsh-src/`, `pi-src/`, and `codex-src/` are built with a pinned upstream
    checkout as their Docker context. The image bakes the exact source, dependencies, build
    toolchain, and boot wrapper that let the run evolve and rebuild its own real source.
 
@@ -44,6 +44,7 @@ state_mount = "/state"                  # harness-internal state (sessions, cach
 | environment | harness | adapter | status |
 |---|---|---|---|
 | `dsh-src/` | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) rc.7 | `dsh` | **default**; exact source evolution, live release-smoke verified |
+| `codex-src/` | [OpenAI Codex](https://github.com/openai/codex) `2126f936` | `codex` | Rust source evolution with Cargo boundary gate |
 | `pi-src/` | [Pi](https://github.com/badlogic/pi-mono) v0.84.2 | `pi` | **default**; exact source evolution, live release-smoke verified |
 | `deepseek-harness/` | DeepSeek Harness rc.7 | — | legacy workspace-only image; not used by the current `dsh` default |
 | `pi/` | Pi v0.84.2 | — | legacy installed-package image; not used by the current `pi` default |

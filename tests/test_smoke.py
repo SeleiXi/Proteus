@@ -119,7 +119,7 @@ def test_file_carrying_adapters_do_not_also_get_the_prompt_copy():
 
 def test_shipped_file_carrying_adapters_declare_it():
     import ast
-    for mod in ("dsh", "pi"):
+    for mod in ("dsh", "pi", "codex"):
         src = Path(f"proteus/adapters/{mod}.py").read_text(encoding="utf-8")
         assert "disposition_in_files = True" in src, f"{mod} carries AGENTS.md but does not declare it"
         ast.parse(src)
