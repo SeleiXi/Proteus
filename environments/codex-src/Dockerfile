@@ -9,6 +9,7 @@ COPY .proteus-boot.sh /usr/local/bin/codex-proteus-boot
 RUN chmod +x /usr/local/bin/codex-proteus-boot \
  && tar -cf /opt/codex-source.tar \
       --exclude=codex-rs/target --exclude=Dockerfile.source \
+      --exclude=.proteus-boot.sh --exclude=build.log --exclude=build.pid \
       --exclude=docker-build.log --exclude=docker-build.pid \
       --exclude=UPSTREAM_COMMIT -C /src . \
  && mkdir /tmp/pristine \
