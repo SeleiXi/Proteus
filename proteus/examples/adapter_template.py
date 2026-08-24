@@ -32,8 +32,8 @@ from pathlib import Path
 from typing import Sequence
 
 from proteus.core.adapter import ActionEvent, EpisodeResult, EpisodeSpec, Surface
+from proteus.core.budget import PHASES, budget_plan, phase_prompt
 from proteus.core.disposition import Disposition
-from proteus.core.episode import PHASES  # ("observe", "propose", "act", "reflect")
 
 
 class TemplateHarness:
@@ -122,10 +122,12 @@ class TemplateHarness:
 
         The writable harness is at `spec.root / "harness"`. If you declared
         `staged_activation = True`, execute from `spec.active_root` instead and keep the
-        candidate separate. Turn budget: `spec.max_turns` bounds the episode;
-        `spec.min_turns_per_phase` reserves turns for later phases (a phase that reaches
-        its reserved line ends early — only a spent budget ends the episode). Honour it or
-        the mid-phase cap is untestable.
+        candidate separate. Turn budget: let `proteus.core.budget` own the allocation —
+        `budget_plan(spec)` validates the legacy `max_turns` / `min_turns_per_phase` knobs
+        and the explicit phase plan alike; `plan.stop_at(phase, used)` is the cumulative
+        call at which this phase must stop, and `phase_prompt(spec, phase, used)` prepends
+        the live budget header when the run announces it. Reaching a phase's stop line ends
+        that phase; only the hard limit ends the episode.
         """
         harness = spec.root / "harness"
         (harness / "notes").mkdir(parents=True, exist_ok=True)  # restore may drop empty dirs
@@ -136,17 +138,18 @@ class TemplateHarness:
         turn = 0
         writes = 0
         capped = False
-        min_pp = int(getattr(spec, "min_turns_per_phase", 0) or 0)
+        plan = budget_plan(spec)
         with trace_path.open("w", encoding="utf-8") as sink:
-            for idx, phase in enumerate(PHASES):
+            for phase in PHASES:
+                if plan.enabled and turn >= plan.hard_limit:
+                    capped = True
                 if capped:
                     break
-                stop_at = (spec.max_turns - min_pp * (len(PHASES) - idx - 1)
-                           if spec.max_turns else 0)
-                prompt = spec.phase_prompts.get(phase, "")
+                stop_at = plan.stop_at(phase, turn)
+                prompt = phase_prompt(spec, phase, turn)
                 for tool, surface, text in self._stub_policy(phase, prompt, spec.episode, rng):
-                    if spec.max_turns and turn >= stop_at:
-                        capped = turn >= spec.max_turns
+                    if plan.enabled and turn >= stop_at:
+                        capped = turn >= plan.hard_limit
                         break
                     turn += 1
                     if tool == "write_note":
