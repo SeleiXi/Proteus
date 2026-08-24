@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 from proteus.adapters.codex import CodexHarness
 
@@ -30,6 +31,22 @@ def test_codex_seed_declares_staged_candidate_paths():
     from proteus.adapters.codex import SEED_INSTRUCTIONS
     assert "/workspace/candidate/src/" in SEED_INSTRUCTIONS
     assert "next episode" in SEED_INSTRUCTIONS
+
+
+def test_codex_source_extraction_uses_an_absolute_bind_mount(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    CodexHarness(auth_home=tmp_path, sandbox=object())._extract_self_code(
+        Path(tmp_path.name + "-relative")
+    )
+    mount = captured["args"][captured["args"].index("-v") + 1]
+    assert mount == f"{tmp_path / (tmp_path.name + '-relative')}:/proteus-out"
 
 
 def test_codex_missing_login_fails_without_launching(tmp_path):

@@ -100,6 +100,7 @@ class CodexHarness:
         self._extract_self_code(harness_root / "src")
 
     def _extract_self_code(self, dest: Path) -> None:
+        dest = dest.resolve()
         if dest.exists() and any(dest.iterdir()):
             return
         dest.mkdir(parents=True, exist_ok=True)
