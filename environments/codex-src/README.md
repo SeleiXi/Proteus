@@ -3,6 +3,8 @@
 This environment evolves the real Apache-2.0 `openai/codex` Rust source. It uses a
 pinned source-built base image, extracts the exact source into each Proteus run, executes
 the frozen active snapshot, and compiles a writable candidate only at an episode boundary.
+The build uses the upstream-pinned Rust 1.95 toolchain. Release ThinLTO is disabled so
+episode-boundary viability builds remain practical; this changes optimization only.
 
 Build the pinned base from an exact official checkout, then add the Proteus runtime layer:
 
