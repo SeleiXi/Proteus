@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 from proteus.adapters.codex import CodexHarness
 
@@ -38,3 +39,34 @@ def test_codex_missing_login_fails_without_launching(tmp_path):
         root=tmp_path, episode=1, model="", phase_prompts={}))
     assert not result.ok
     assert "not logged in" in result.error
+
+
+def test_codex_budget_stop_is_a_cap_not_an_error(tmp_path):
+    from proteus.core.adapter import EpisodeSpec
+
+    class Sandbox:
+        calls = 0
+
+        def run(self, root, args, env, timeout_s, mounts=(), stop_check=None):
+            self.calls += 1
+            records = next(item[0] for item in mounts if item[1] == "/records")
+            trace_name = args[1].split("/")[-1]
+            path = tmp_path / "traces" / trace_name
+            assert str(path.parent) == records
+            path.write_text(json.dumps({
+                "type": "item.completed",
+                "item": {"type": "command_execution", "command": "true"},
+            }) + "\n", encoding="utf-8")
+            fired = bool(stop_check and stop_check())
+            return subprocess.CompletedProcess(args, 137 if fired else 0, "", "")
+
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    (auth / "auth.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "harness").mkdir()
+    sandbox = Sandbox()
+    adapter = CodexHarness(auth_home=auth, sandbox=sandbox)
+    result = adapter.run_episode(EpisodeSpec(
+        root=tmp_path, episode=1, model="", phase_prompts={}, max_turns=1))
+    assert result.ok and result.turns == 1
+    assert sandbox.calls == 1

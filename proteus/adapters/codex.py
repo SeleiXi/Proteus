@@ -180,6 +180,9 @@ class CodexHarness:
         for phase in PHASES:
             if plan.enabled and used >= plan.hard_limit:
                 break
+            stop_at = plan.stop_at(phase, used)
+            if plan.enabled and used >= stop_at:
+                continue
             handoff_start = handoffs.begin(spec.episode, phase)
             trace = self._trace_path(run_root, spec.episode, phase)
             args = ["--proteus-trace", f"/records/{trace.name}",
@@ -198,9 +201,20 @@ class CodexHarness:
                 (str(handoffs.root), CONTAINER_ROOT),
                 (str(auth), "/run/proteus-codex-auth.json", "ro"),
             ) + self._task_mount(run_root)
+            fired = [False]
+
+            def stop_check() -> bool:
+                current = used + sum(
+                    1 for event in self._read_native_trace(trace, phase) if event.tool)
+                if current >= stop_at:
+                    fired[0] = True
+                    return True
+                return False
+
             try:
                 proc = self.sandbox.run(run_root, args, env=self.proxy_env,
-                                        timeout_s=self.phase_timeout_s, mounts=mounts)
+                                        timeout_s=self.phase_timeout_s, mounts=mounts,
+                                        stop_check=stop_check if plan.enabled else None)
             except subprocess.TimeoutExpired:
                 error = f"phase {phase}: timeout after {self.phase_timeout_s}s"
                 break
@@ -209,6 +223,10 @@ class CodexHarness:
             used += sum(1 for event in phase_events if event.tool)
             phase_count += 1
             if proc.returncode:
+                if fired[0]:
+                    if plan.enabled and used >= plan.hard_limit:
+                        break
+                    continue
                 error = (f"phase {phase}: exit {proc.returncode}: "
                          f"{(proc.stderr or proc.stdout)[-500:]}")
                 break
