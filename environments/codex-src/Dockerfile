@@ -1,6 +1,6 @@
 # Thin source-evolution layer over the pinned, source-built Codex image.
 # Build the base image from the official openai/codex checkout first (README.md).
-ARG CODEX_BASE=codex-src:2126f936
+ARG CODEX_BASE=codex-src:ff29a443
 FROM ${CODEX_BASE}
 
 RUN apt-get update && apt-get install -y --no-install-recommends rsync \

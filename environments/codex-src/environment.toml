@@ -1,6 +1,6 @@
 [environment]
 name = "codex-src"
-image = "proteus-env-codex-src:2126f936"
+image = "proteus-env-codex-src:ff29a443"
 network = "host"
 memory = "14g"
 cpus = 2

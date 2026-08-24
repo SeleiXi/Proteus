@@ -1,9 +1,16 @@
 # Build context: an exact pinned checkout/archive of https://github.com/openai/codex.
-FROM rust:1.95-bookworm
+# CODEX_CACHE_BASE may name an earlier source build to reuse its Cargo target.
+ARG CODEX_CACHE_BASE=rust:1.95-bookworm
+FROM ${CODEX_CACHE_BASE}
 RUN apt-get update && apt-get install -y --no-install-recommends \
       pkg-config libssl-dev clang cmake git \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
+RUN if [ -d codex-rs/target ]; then mv codex-rs/target /tmp/codex-target; fi \
+ && find /src -mindepth 1 -maxdepth 1 -exec rm -rf {} + \
+ && if [ -d /tmp/codex-target ]; then \
+      mkdir -p codex-rs && mv /tmp/codex-target codex-rs/target; \
+    fi
 COPY . .
 ENV CARGO_BUILD_JOBS=1 CARGO_NET_GIT_FETCH_WITH_CLI=true \
     CARGO_PROFILE_RELEASE_LTO=false

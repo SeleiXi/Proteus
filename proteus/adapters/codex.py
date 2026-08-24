@@ -20,7 +20,7 @@ from proteus.core.budget import PHASES, budget_plan, phase_prompt
 from proteus.core.continuity import CONTAINER_ROOT, HandoffStore
 from proteus.core.disposition import Disposition
 
-IMAGE = os.environ.get("PROTEUS_CODEX_IMAGE", "proteus-env-codex-src:2126f936")
+IMAGE = os.environ.get("PROTEUS_CODEX_IMAGE", "proteus-env-codex-src:ff29a443")
 SOURCE_TAR = "/opt/codex-source.tar"
 PHASE_TIMEOUT_S = 900
 

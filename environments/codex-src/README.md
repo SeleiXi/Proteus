@@ -9,13 +9,19 @@ episode-boundary viability builds remain practical; this changes optimization on
 Build the pinned base from an exact official checkout, then add the Proteus runtime layer:
 
 ```bash
+git clone --depth 1 --branch rust-v0.149.1 \
+  https://github.com/openai/codex.git ~/seleixi/codex-src
 docker build -f ~/seleixi/proteus/environments/codex-src/Dockerfile.base \
-  -t codex-src:2126f936 ~/seleixi/codex-src
+  -t codex-src:ff29a443 ~/seleixi/codex-src
 cp environments/codex-src/boot.sh ~/seleixi/codex-src/.proteus-boot.sh
 docker build -f environments/codex-src/Dockerfile \
-  --build-arg CODEX_BASE=codex-src:2126f936 \
-  -t proteus-env-codex-src:2126f936 ~/seleixi/codex-src
+  --build-arg CODEX_BASE=codex-src:ff29a443 \
+  -t proteus-env-codex-src:ff29a443 ~/seleixi/codex-src
 ```
+
+The tag resolves to official commit `ff29a44391deccde0aba0f8390337d7f3c319ea4` and
+matches the stable Codex 0.149.1 protocol. To reuse an earlier source build's Cargo
+artifacts, add `--build-arg CODEX_CACHE_BASE=codex-src:<old-sha>` to the base build.
 
 The image stores Cargo build products under the run-local `/state`; it never replaces
 the host npm Codex installation. Runtime model access uses a read-only bind of the user's
