@@ -58,17 +58,22 @@ def test_codex_missing_login_fails_without_launching(tmp_path):
     assert "not logged in" in result.error
 
 
-def test_codex_budget_stop_is_a_cap_not_an_error(tmp_path):
+def test_codex_budget_stop_is_a_cap_not_an_error(tmp_path, monkeypatch):
     from proteus.core.adapter import EpisodeSpec
+
+    monkeypatch.chdir(tmp_path)
+    run_root = tmp_path / "run"
 
     class Sandbox:
         calls = 0
 
         def run(self, root, args, env, timeout_s, mounts=(), stop_check=None):
             self.calls += 1
+            assert Path(root).is_absolute()
+            assert all(Path(item[0]).is_absolute() for item in mounts)
             records = next(item[0] for item in mounts if item[1] == "/records")
             trace_name = args[1].split("/")[-1]
-            path = tmp_path / "traces" / trace_name
+            path = run_root / "traces" / trace_name
             assert str(path.parent) == records
             path.write_text(json.dumps({
                 "type": "item.completed",
@@ -80,10 +85,10 @@ def test_codex_budget_stop_is_a_cap_not_an_error(tmp_path):
     auth = tmp_path / "auth"
     auth.mkdir()
     (auth / "auth.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "harness").mkdir()
+    (run_root / "harness").mkdir(parents=True)
     sandbox = Sandbox()
     adapter = CodexHarness(auth_home=auth, sandbox=sandbox)
     result = adapter.run_episode(EpisodeSpec(
-        root=tmp_path, episode=1, model="", phase_prompts={}, max_turns=1))
+        root=Path("run"), episode=1, model="", phase_prompts={}, max_turns=1))
     assert result.ok and result.turns == 1
     assert sandbox.calls == 1

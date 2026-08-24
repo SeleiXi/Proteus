@@ -123,7 +123,7 @@ class CodexHarness:
         return instructions.block_fingerprint(Path(harness_root) / "AGENTS.md")
 
     def check_boot(self, harness_root: Path) -> str:
-        harness = Path(harness_root)
+        harness = Path(harness_root).resolve()
         state = harness.parent / ".codex-build-state"
         state.mkdir(exist_ok=True)
         proc = self.sandbox.run(
@@ -153,14 +153,15 @@ class CodexHarness:
         if not auth.is_file():
             return EpisodeResult(
                 spec.episode, False, 0, "Codex is not logged in: auth.json missing")
-        run_root = Path(spec.root)
+        run_root = Path(spec.root).resolve()
         harness = run_root / "harness"
         state = run_root / ".codex-state"
         state.mkdir(exist_ok=True)
         traces = run_root / "traces"
         traces.mkdir(exist_ok=True)
         handoffs = HandoffStore(run_root)
-        active = Path(spec.active_root) if spec.active_root is not None else harness
+        active = (Path(spec.active_root).resolve()
+                  if spec.active_root is not None else harness)
         if spec.active_root is None and (harness / "src").is_dir():
             error = self.check_boot(harness)
             if error:
