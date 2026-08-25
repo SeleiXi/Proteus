@@ -105,6 +105,7 @@ class CodexHarness:
         return frozenset({"file_change", "command"})
 
     def seed(self, harness_root: Path, rng_seed: int = 0) -> None:
+        harness_root = Path(harness_root).resolve()
         harness_root.mkdir(parents=True, exist_ok=True)
         (harness_root / "AGENTS.md").write_text(SEED_INSTRUCTIONS, encoding="utf-8")
         for sub in ("notes", "tools", ".agents/skills"):
@@ -145,7 +146,7 @@ class CodexHarness:
         return target.exists() or bool(self.api_key)
 
     def check_boot(self, harness_root: Path) -> str:
-        harness = Path(harness_root)
+        harness = Path(harness_root).resolve()
         state = harness.parent / ".codex-state"
         state.mkdir(exist_ok=True)
         proc = self.sandbox.run(
@@ -286,7 +287,10 @@ class CodexHarness:
         return sum(1 for event in self._jsonl_trace(text, "live") if event.tool)
 
     def run_episode(self, spec: EpisodeSpec) -> EpisodeResult:
-        run_root = Path(spec.root)
+        # Docker's `-v` treats a relative host path as a named-volume reference, not a
+        # bind mount, so every mount source must be absolute regardless of what the
+        # caller passed (a relative --out is otherwise a hard failure on `docker run`).
+        run_root = Path(spec.root).resolve()
         harness = run_root / "harness"
         state = run_root / ".codex-state"
         state.mkdir(exist_ok=True)
@@ -309,7 +313,7 @@ class CodexHarness:
         used = 0
         capped = False
 
-        active = Path(spec.active_root) if spec.active_root is not None else harness
+        active = Path(spec.active_root).resolve() if spec.active_root is not None else harness
         if spec.active_root is None and (harness / "src").is_dir():
             error = self.check_boot(harness)
         if spec.active_root is not None:
