@@ -2,13 +2,18 @@
 # Pin by immutable SHA for reproducible experiments.
 FROM rust:1.95-bookworm
 
-ARG CODEX_REF=eb15245d820d094cc0e5a950bc052bd7c2c5f925
+ARG CODEX_REF=a7b86b6201d35200280e3d24ca5ebccd8122d6ca
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git ca-certificates pkg-config libssl-dev libcap-dev clang cmake python3 jq rsync zstd \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/openai/codex.git /opt/src \
+# GitHub clones on some build hosts are flaky (TLS resets, mid-transfer EOF); retry
+# rather than fail the whole image build on a transient network blip.
+RUN for i in 1 2 3 4 5; do \
+      rm -rf /opt/src && git clone https://github.com/openai/codex.git /opt/src && break; \
+      echo "clone attempt $i failed, retrying..." >&2; sleep 5; \
+    done \
     && cd /opt/src \
     && git checkout --detach "$CODEX_REF" \
     && git submodule update --init --recursive
