@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -41,7 +42,15 @@ def test_codex_boundary_build_reuses_disposable_image_cache():
     assert "CARGO_TARGET_DIR=/src/codex-rs/target" in boot
     assert "CARGO_TARGET_DIR=/state/cargo-target" not in boot
     assert "cp /src/codex-rs/target/release/codex" in boot
-    assert "chmod -R a+rwX /src" in dockerfile
+    assert "chmod -R a+rwX /src" not in dockerfile
+
+
+def test_codex_boundary_build_uses_root_but_agent_calls_use_host_user(tmp_path, monkeypatch):
+    monkeypatch.setattr(os, "getuid", lambda: 1234, raising=False)
+    monkeypatch.setattr(os, "getgid", lambda: 5678, raising=False)
+    adapter = CodexHarness(auth_home=tmp_path)
+    assert adapter.sandbox.config.user == "1234:5678"
+    assert adapter.build_sandbox.config.user == ""
 
 
 def test_codex_source_extraction_uses_an_absolute_bind_mount(tmp_path, monkeypatch):

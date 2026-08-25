@@ -86,6 +86,13 @@ class CodexHarness:
             network=network, image=image, user=host_user,
             env_passthrough=tuple(self.proxy_env),
         ))
+        # Boundary compilation writes into the image's root-owned, prebuilt Cargo
+        # target.  It therefore runs as container root, while all model-driven phases
+        # keep running as the host uid/gid so candidate files remain host-owned.
+        self.build_sandbox = sandbox or DockerSandbox(SandboxConfig(
+            network=network, image=image,
+            env_passthrough=tuple(self.proxy_env),
+        ))
 
     def surfaces(self) -> Sequence[Surface]:
         return self.SURFACES
@@ -127,7 +134,7 @@ class CodexHarness:
         harness = Path(harness_root).resolve()
         state = harness.parent / ".codex-build-state"
         state.mkdir(exist_ok=True)
-        proc = self.sandbox.run(
+        proc = self.build_sandbox.run(
             harness.parent, ["--version"], env={}, timeout_s=1800,
             mounts=((str(harness), "/workspace"), (str(state), "/state")),
         )

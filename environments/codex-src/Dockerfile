@@ -18,8 +18,7 @@ RUN chmod +x /usr/local/bin/codex-proteus-boot \
  && rm -rf /tmp/pristine \
  && mkdir -p /codex-state /state \
  && chmod a+rwx /codex-state /state \
- && chmod -R a+rwX /src \
- && chmod -R a+rX /usr/local/rustup \
+ && chmod -R a+rX /src /usr/local/rustup \
  && chmod -R a+rwX /usr/local/cargo \
  && chmod a+r /opt/codex-source.tar /opt/pristine-hash
 WORKDIR /workspace
