@@ -18,9 +18,13 @@ RUN for i in 1 2 3 4 5; do \
     && git checkout --detach "$CODEX_REF" \
     && git submodule update --init --recursive
 
-# Warm the exact Cargo dependency/build cache once in the image.
+# Warm the exact Cargo dependency/build cache once in the image. Override
+# CARGO_BUILD_JOBS on memory-constrained build hosts (rustc's LTO codegen for the
+# largest crates can OOM at full `-j nproc` parallelism on small boxes).
+ARG CARGO_BUILD_JOBS=
 RUN cd /opt/src/codex-rs \
     && cargo fetch --locked \
+    && if [ -n "$CARGO_BUILD_JOBS" ]; then export CARGO_BUILD_JOBS; fi \
     && CARGO_TARGET_DIR=/opt/codex-target cargo build --locked -p codex-cli --release
 
 # Seed tar is exactly the source used above; generated build state and .git are excluded.
