@@ -53,6 +53,12 @@ def test_codex_boundary_build_uses_root_but_agent_calls_use_host_user(tmp_path, 
     assert adapter.build_sandbox.config.user == ""
 
 
+def test_codex_boundary_timeout_allows_contended_release_builds():
+    from proteus.adapters.codex import BOUNDARY_TIMEOUT_S
+
+    assert BOUNDARY_TIMEOUT_S >= 3600
+
+
 def test_codex_source_extraction_uses_an_absolute_bind_mount(tmp_path, monkeypatch):
     captured = {}
 

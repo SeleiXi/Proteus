@@ -23,6 +23,7 @@ from proteus.core.disposition import Disposition
 IMAGE = os.environ.get("PROTEUS_CODEX_IMAGE", "proteus-env-codex-src:ff29a443")
 SOURCE_TAR = "/opt/codex-source.tar"
 PHASE_TIMEOUT_S = 900
+BOUNDARY_TIMEOUT_S = 3600
 DEFAULT_MODEL = os.environ.get("PROTEUS_CODEX_MODEL", "gpt-5.5")
 
 SEED_INSTRUCTIONS = """\
@@ -135,7 +136,7 @@ class CodexHarness:
         state = harness.parent / ".codex-build-state"
         state.mkdir(exist_ok=True)
         proc = self.build_sandbox.run(
-            harness.parent, ["--version"], env={}, timeout_s=1800,
+            harness.parent, ["--version"], env={}, timeout_s=BOUNDARY_TIMEOUT_S,
             mounts=((str(harness), "/workspace"), (str(state), "/state")),
         )
         if proc.returncode:
