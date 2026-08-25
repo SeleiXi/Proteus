@@ -19,9 +19,14 @@ RUN cd /opt/src/codex-rs \
     && CARGO_TARGET_DIR=/opt/codex-target cargo build --locked -p codex-cli --release
 
 # Seed tar is exactly the source used above; generated build state and .git are excluded.
+# The hash uses the same recipe as boot.sh's SOURCE_HASH so a first boot's freshly
+# extracted /workspace/src hashes identically and can reuse /opt/codex-target as-is.
 RUN tar --exclude=.git --exclude=target -cf /opt/codex-source.tar -C /opt/src . \
     && cp -a /usr/local/cargo /opt/cargo-home-seed \
-    && chmod -R a+rX /opt/cargo-home-seed /opt/codex-target /opt/src /opt/codex-source.tar
+    && (cd /opt/src && { find . -type f ! -path '*/.git/*' ! -path '*/target/*' -print0 | \
+         sort -z | xargs -0 sha256sum; } | sha256sum | awk '{print $1}') > /opt/codex-source.sha256 \
+    && chmod -R a+rX /opt/cargo-home-seed /opt/codex-target /opt/src /opt/codex-source.tar \
+                      /opt/codex-source.sha256
 
 COPY boot.sh /usr/local/bin/proteus-codex
 RUN chmod +x /usr/local/bin/proteus-codex

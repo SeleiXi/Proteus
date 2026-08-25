@@ -92,7 +92,8 @@ class CodexHarness:
         self.sandbox = sandbox or DockerSandbox(SandboxConfig(
             network=network,
             image=image,
-            env_passthrough=("OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"),
+            env_passthrough=("OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL",
+                              "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"),
             user=host_user,
         ))
 
@@ -362,6 +363,11 @@ class CodexHarness:
                         "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
                         "CODEX_API_KEY": os.environ.get("CODEX_API_KEY", ""),
                         "OPENAI_BASE_URL": os.environ.get("OPENAI_BASE_URL", ""),
+                        # Some hosts have no direct route to the Codex/OpenAI API and
+                        # need an outbound proxy; forward it if the host has one set.
+                        "HTTP_PROXY": os.environ.get("HTTP_PROXY", ""),
+                        "HTTPS_PROXY": os.environ.get("HTTPS_PROXY", ""),
+                        "NO_PROXY": os.environ.get("NO_PROXY", ""),
                     }.items() if v},
                     timeout_s=self.phase_timeout_s,
                     mounts=workspace_mounts + ((str(state), "/state"),
