@@ -20,11 +20,13 @@ if [ -d /workspace/src/codex-rs ]; then
     if [ "$HASH" != "$(cat /opt/pristine-hash)" ]; then
         BIN=/state/codex-$HASH
         if [ ! -x "$BIN" ]; then
-            BUILD=/state/build-$HASH
-            mkdir -p "$BUILD"
-            rsync -a --delete --exclude codex-rs/target /workspace/src/ "$BUILD/"
-            if ! (cd "$BUILD" && CARGO_HOME=/usr/local/cargo CARGO_NET_OFFLINE=true \
-                    CARGO_TARGET_DIR=/state/cargo-target CARGO_BUILD_JOBS=1 \
+            # /src and its prebuilt target live in this disposable container layer.
+            # Overlaying the candidate there preserves Cargo's source paths and lets a
+            # boundary build reuse the image's 11 GiB dependency cache.  The resulting
+            # binary alone is copied to run-local state; the image and host stay intact.
+            rsync -a --delete --exclude codex-rs/target /workspace/src/ /src/
+            if ! (cd /src && CARGO_HOME=/usr/local/cargo CARGO_NET_OFFLINE=true \
+                    CARGO_TARGET_DIR=/src/codex-rs/target CARGO_BUILD_JOBS=1 \
                     CARGO_PROFILE_RELEASE_LTO=false \
                     cargo build --manifest-path codex-rs/Cargo.toml -p codex-cli \
                     --release --bin codex \
@@ -33,7 +35,7 @@ if [ -d /workspace/src/codex-rs ]; then
                 tail -40 /state/last-build.log >&2
                 exit 97
             fi
-            cp /state/cargo-target/release/codex "$BIN"
+            cp /src/codex-rs/target/release/codex "$BIN"
             chmod +x "$BIN"
         fi
     fi

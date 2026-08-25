@@ -33,6 +33,17 @@ def test_codex_seed_declares_staged_candidate_paths():
     assert "next episode" in SEED_INSTRUCTIONS
 
 
+def test_codex_boundary_build_reuses_disposable_image_cache():
+    boot = Path("environments/codex-src/boot.sh").read_text()
+    dockerfile = Path("environments/codex-src/Dockerfile").read_text()
+
+    assert "rsync -a --delete --exclude codex-rs/target /workspace/src/ /src/" in boot
+    assert "CARGO_TARGET_DIR=/src/codex-rs/target" in boot
+    assert "CARGO_TARGET_DIR=/state/cargo-target" not in boot
+    assert "cp /src/codex-rs/target/release/codex" in boot
+    assert "chmod -R a+rwX /src" in dockerfile
+
+
 def test_codex_source_extraction_uses_an_absolute_bind_mount(tmp_path, monkeypatch):
     captured = {}
 

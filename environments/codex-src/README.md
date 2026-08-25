@@ -33,7 +33,9 @@ not available in the runtime container. The outer Proteus Docker sandbox remains
 security boundary: the active harness is mounted read-only, the candidate and run state
 are the only writable host mounts, and host Codex credentials are mounted read-only.
 
-The image stores Cargo build products under the run-local `/state`; it never replaces
+Candidate validation reuses the image's Cargo products inside its disposable container
+layer and copies only hash-addressed candidate binaries into run-local `/state`. Container
+exit discards the overlaid source and Cargo changes, so this never replaces the image or
 the host npm Codex installation. Runtime model access uses a read-only bind of the user's
 `~/.codex/auth.json`, copied into framework-private state rather than the evolving tree.
 Set `PROTEUS_CODEX_PROXY=http://127.0.0.1:7890` when the host reaches ChatGPT through a
