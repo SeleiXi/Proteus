@@ -34,6 +34,9 @@ def test_codex_seed_declares_staged_candidate_paths():
     assert "next episode" in SEED_INSTRUCTIONS
     assert "no `.git` metadata" in SEED_INSTRUCTIONS
     assert "Do not spend calls" in SEED_INSTRUCTIONS
+    assert "CARGO_HOME" in SEED_INSTRUCTIONS
+    assert "/state/cargo-home" in SEED_INSTRUCTIONS
+    assert "never create `.cargo-home`" in SEED_INSTRUCTIONS
 
 
 def test_codex_boundary_build_reuses_disposable_image_cache():
@@ -119,6 +122,7 @@ def test_codex_budget_stop_is_a_cap_not_an_error(tmp_path, monkeypatch):
 
         def run(self, root, args, env, timeout_s, mounts=(), stop_check=None):
             self.calls += 1
+            assert env["CARGO_HOME"] == "/state/cargo-home"
             assert "features.code_mode_host=false" in args
             assert args[args.index("--model") + 1] == "gpt-5.5"
             assert "--dangerously-bypass-approvals-and-sandbox" in args
