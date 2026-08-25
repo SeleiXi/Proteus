@@ -92,7 +92,19 @@ class CodexHarness:
         elif isinstance(sandbox, DockerSandbox) and host_user and not sandbox.config.user:
             # A generic --env manifest normally omits user. Codex writes several
             # persistent bind mounts, so preserve host ownership even through that path.
-            self.sandbox = DockerSandbox(replace(sandbox.config, user=host_user))
+            passthrough = tuple(dict.fromkeys(
+                (*sandbox.config.env_passthrough, *self.proxy_env)
+            ))
+            self.sandbox = DockerSandbox(replace(
+                sandbox.config, user=host_user, env_passthrough=passthrough
+            ))
+        elif isinstance(sandbox, DockerSandbox):
+            passthrough = tuple(dict.fromkeys(
+                (*sandbox.config.env_passthrough, *self.proxy_env)
+            ))
+            self.sandbox = DockerSandbox(replace(
+                sandbox.config, env_passthrough=passthrough
+            ))
         else:
             self.sandbox = sandbox
         # Boundary compilation writes into the image's root-owned, prebuilt Cargo

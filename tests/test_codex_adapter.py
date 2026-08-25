@@ -58,12 +58,19 @@ def test_codex_env_sandbox_still_preserves_host_owned_candidate_files(tmp_path, 
 
     monkeypatch.setattr(os, "getuid", lambda: 1234, raising=False)
     monkeypatch.setattr(os, "getgid", lambda: 5678, raising=False)
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("PROTEUS_CODEX_PROXY", "http://127.0.0.1:7892")
     supplied = DockerSandbox(SandboxConfig(image="custom", cpus="2"))
     adapter = CodexHarness(auth_home=tmp_path, sandbox=supplied)
 
     assert adapter.sandbox.config.image == "custom"
     assert adapter.sandbox.config.cpus == "2"
     assert adapter.sandbox.config.user == "1234:5678"
+    assert set(adapter.sandbox.config.env_passthrough) == {
+        "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"
+    }
+    assert adapter.proxy_env["HTTPS_PROXY"] == "http://127.0.0.1:7892"
     assert adapter.build_sandbox.config.user == ""
 
 
