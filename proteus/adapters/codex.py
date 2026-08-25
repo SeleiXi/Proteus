@@ -190,7 +190,7 @@ class CodexHarness:
             trace = self._trace_path(run_root, spec.episode, phase)
             args = ["--proteus-trace", f"/records/{trace.name}",
                     "-c", "features.code_mode_host=false",
-                    "exec", "--json", "--sandbox", "workspace-write",
+                    "exec", "--json", "--dangerously-bypass-approvals-and-sandbox",
                     "--skip-git-repo-check", "--ephemeral", "-C", "/workspace"]
             chosen_model = spec.model or self.model
             if chosen_model:

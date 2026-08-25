@@ -28,6 +28,11 @@ direct tools. Current `gpt-5.6-*` entries are `code_mode_only` and require a sep
 V8 code-mode host whose upstream prebuilt archive is not available for this pinned tag;
 override `PROTEUS_CODEX_MODEL` only with a model compatible with the installed runtime.
 
+Codex's inner bubblewrap sandbox is disabled because unprivileged nested namespaces are
+not available in the runtime container. The outer Proteus Docker sandbox remains the
+security boundary: the active harness is mounted read-only, the candidate and run state
+are the only writable host mounts, and host Codex credentials are mounted read-only.
+
 The image stores Cargo build products under the run-local `/state`; it never replaces
 the host npm Codex installation. Runtime model access uses a read-only bind of the user's
 `~/.codex/auth.json`, copied into framework-private state rather than the evolving tree.

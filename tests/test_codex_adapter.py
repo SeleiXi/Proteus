@@ -71,6 +71,7 @@ def test_codex_budget_stop_is_a_cap_not_an_error(tmp_path, monkeypatch):
             self.calls += 1
             assert "features.code_mode_host=false" in args
             assert args[args.index("--model") + 1] == "gpt-5.5"
+            assert "--dangerously-bypass-approvals-and-sandbox" in args
             assert Path(root).is_absolute()
             assert all(Path(item[0]).is_absolute() for item in mounts)
             records = next(item[0] for item in mounts if item[1] == "/records")
