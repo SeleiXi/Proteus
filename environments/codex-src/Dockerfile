@@ -3,7 +3,7 @@
 ARG CODEX_BASE=codex-src:ff29a443
 FROM ${CODEX_BASE}
 
-RUN apt-get update && apt-get install -y --no-install-recommends rsync \
+RUN apt-get update && apt-get install -y --no-install-recommends ripgrep rsync \
  && rm -rf /var/lib/apt/lists/*
 COPY .proteus-boot.sh /usr/local/bin/codex-proteus-boot
 RUN chmod +x /usr/local/bin/codex-proteus-boot \

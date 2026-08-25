@@ -43,6 +43,10 @@ Persistent candidate surfaces:
 - `/workspace/candidate/skills/` — Codex skills
 - `/workspace/candidate/src/` — the real open-source Codex Rust workspace
 
+The extracted source intentionally has no `.git` metadata. Do not spend calls on
+`git status` or `git diff` there. Inspect candidate files directly; when a comparison is
+needed, compare `/workspace/src/...` (active) with `/workspace/candidate/src/...`.
+
 Read and replace `/workspace/.proteus/handoff.md` as each phase requests. Do not place
 credentials, raw reasoning, or raw tool output in the handoff.
 """

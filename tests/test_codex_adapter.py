@@ -32,6 +32,8 @@ def test_codex_seed_declares_staged_candidate_paths():
     from proteus.adapters.codex import SEED_INSTRUCTIONS
     assert "/workspace/candidate/src/" in SEED_INSTRUCTIONS
     assert "next episode" in SEED_INSTRUCTIONS
+    assert "no `.git` metadata" in SEED_INSTRUCTIONS
+    assert "Do not spend calls" in SEED_INSTRUCTIONS
 
 
 def test_codex_boundary_build_reuses_disposable_image_cache():
@@ -43,6 +45,7 @@ def test_codex_boundary_build_reuses_disposable_image_cache():
     assert "CARGO_TARGET_DIR=/state/cargo-target" not in boot
     assert "cp /src/codex-rs/target/release/codex" in boot
     assert "chmod -R" not in dockerfile
+    assert "ripgrep rsync" in dockerfile
 
 
 def test_codex_boundary_build_uses_root_but_agent_calls_use_host_user(tmp_path, monkeypatch):
