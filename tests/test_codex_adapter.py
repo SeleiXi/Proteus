@@ -117,6 +117,10 @@ def test_codex_budget_stop_is_a_cap_not_an_error(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     run_root = tmp_path / "run"
 
+    traces = run_root / "traces"
+    traces.mkdir(parents=True)
+    (traces / "ep001-observe.jsonl").write_text("stale trace\n", encoding="utf-8")
+
     class Sandbox:
         calls = 0
 
@@ -132,6 +136,9 @@ def test_codex_budget_stop_is_a_cap_not_an_error(tmp_path, monkeypatch):
             trace_name = args[1].split("/")[-1]
             path = run_root / "traces" / trace_name
             assert str(path.parent) == records
+            assert not path.exists()
+            archived = path.with_name("ep001-observe-attempt-01.jsonl")
+            assert archived.read_text(encoding="utf-8") == "stale trace\n"
             path.write_text(json.dumps({
                 "type": "item.completed",
                 "item": {"type": "command_execution", "command": "true"},

@@ -186,6 +186,18 @@ class CodexHarness:
     def _trace_path(run_root: Path, episode: int, phase: str) -> Path:
         return run_root / "traces" / f"ep{episode:03d}-{phase}.jsonl"
 
+    @staticmethod
+    def _prepare_trace(path: Path) -> None:
+        if not path.exists():
+            return
+        attempt = 1
+        while True:
+            archived = path.with_name(f"{path.stem}-attempt-{attempt:02d}{path.suffix}")
+            if not archived.exists():
+                path.replace(archived)
+                return
+            attempt += 1
+
     def run_episode(self, spec: EpisodeSpec) -> EpisodeResult:
         auth = self.auth_home / "auth.json"
         if not auth.is_file():
@@ -225,6 +237,7 @@ class CodexHarness:
                 continue
             handoff_start = handoffs.begin(spec.episode, phase)
             trace = self._trace_path(run_root, spec.episode, phase)
+            self._prepare_trace(trace)
             args = ["--proteus-trace", f"/records/{trace.name}",
                     "-c", "features.code_mode_host=false",
                     "exec", "--json", "--dangerously-bypass-approvals-and-sandbox",
