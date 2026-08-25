@@ -49,13 +49,6 @@ def test_codex_source_extraction_uses_an_absolute_bind_mount(tmp_path, monkeypat
     assert mount == f"{tmp_path / (tmp_path.name + '-relative')}:/proteus-out"
 
 
-def test_codex_boundary_builds_code_mode_host_with_the_cli():
-    boot = (Path(__file__).parents[1] / "environments" / "codex-src" / "boot.sh")
-    text = boot.read_text(encoding="utf-8")
-    assert "-p codex-code-mode-host --bin codex-code-mode-host" in text
-    assert "/state/cargo-target/release/codex-code-mode-host" in text
-
-
 def test_codex_missing_login_fails_without_launching(tmp_path):
     from proteus.core.adapter import EpisodeSpec
     adapter = CodexHarness(auth_home=tmp_path, sandbox=object())
@@ -76,6 +69,8 @@ def test_codex_budget_stop_is_a_cap_not_an_error(tmp_path, monkeypatch):
 
         def run(self, root, args, env, timeout_s, mounts=(), stop_check=None):
             self.calls += 1
+            assert "features.code_mode_host=false" in args
+            assert args[args.index("--model") + 1] == "gpt-5.5"
             assert Path(root).is_absolute()
             assert all(Path(item[0]).is_absolute() for item in mounts)
             records = next(item[0] for item in mounts if item[1] == "/records")

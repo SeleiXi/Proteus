@@ -22,8 +22,11 @@ docker build -f environments/codex-src/Dockerfile \
 The tag resolves to official commit `ff29a44391deccde0aba0f8390337d7f3c319ea4` and
 matches the stable Codex 0.149.1 protocol. To reuse an earlier source build's Cargo
 artifacts, add `--build-arg CODEX_CACHE_BASE=codex-src:<old-sha>` to the base build.
-Both `codex` and its source-built `codex-code-mode-host` companion are included; a
-source-edited candidate must compile both before it can activate.
+
+The adapter defaults to `gpt-5.5`, whose catalog metadata uses the open-source CLI's
+direct tools. Current `gpt-5.6-*` entries are `code_mode_only` and require a separate
+V8 code-mode host whose upstream prebuilt archive is not available for this pinned tag;
+override `PROTEUS_CODEX_MODEL` only with a model compatible with the installed runtime.
 
 The image stores Cargo build products under the run-local `/state`; it never replaces
 the host npm Codex installation. Runtime model access uses a read-only bind of the user's

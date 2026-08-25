@@ -18,8 +18,7 @@ BIN=/src/codex-rs/target/release/codex
 if [ -d /workspace/src/codex-rs ]; then
     HASH=$(tree_hash /workspace/src)
     if [ "$HASH" != "$(cat /opt/pristine-hash)" ]; then
-        ACTIVE_BIN=/state/bin-$HASH
-        BIN=$ACTIVE_BIN/codex
+        BIN=/state/codex-$HASH
         if [ ! -x "$BIN" ]; then
             BUILD=/state/build-$HASH
             mkdir -p "$BUILD"
@@ -27,18 +26,15 @@ if [ -d /workspace/src/codex-rs ]; then
             if ! (cd "$BUILD" && CARGO_HOME=/usr/local/cargo CARGO_NET_OFFLINE=true \
                     CARGO_TARGET_DIR=/state/cargo-target CARGO_BUILD_JOBS=1 \
                     CARGO_PROFILE_RELEASE_LTO=false \
-                    cargo build --manifest-path codex-rs/Cargo.toml \
-                    -p codex-cli --bin codex \
-                    -p codex-code-mode-host --bin codex-code-mode-host --release \
+                    cargo build --manifest-path codex-rs/Cargo.toml -p codex-cli \
+                    --release --bin codex \
                     > /state/last-build.log 2>&1); then
                 echo "self-edited Codex source does not build:" >&2
                 tail -40 /state/last-build.log >&2
                 exit 97
             fi
-            mkdir -p "$ACTIVE_BIN"
-            cp /state/cargo-target/release/codex \
-               /state/cargo-target/release/codex-code-mode-host "$ACTIVE_BIN/"
-            chmod +x "$ACTIVE_BIN/codex" "$ACTIVE_BIN/codex-code-mode-host"
+            cp /state/cargo-target/release/codex "$BIN"
+            chmod +x "$BIN"
         fi
     fi
 fi

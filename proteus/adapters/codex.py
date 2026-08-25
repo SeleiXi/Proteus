@@ -23,6 +23,7 @@ from proteus.core.disposition import Disposition
 IMAGE = os.environ.get("PROTEUS_CODEX_IMAGE", "proteus-env-codex-src:ff29a443")
 SOURCE_TAR = "/opt/codex-source.tar"
 PHASE_TIMEOUT_S = 900
+DEFAULT_MODEL = os.environ.get("PROTEUS_CODEX_MODEL", "gpt-5.5")
 
 SEED_INSTRUCTIONS = """\
 # Agent instructions
@@ -66,7 +67,7 @@ class CodexHarness:
     )
 
     def __init__(self, image: str = IMAGE, network: str = "host",
-                 model: str = "", auth_home: Path | None = None,
+                 model: str = DEFAULT_MODEL, auth_home: Path | None = None,
                  sandbox=None, phase_timeout_s: int = PHASE_TIMEOUT_S) -> None:
         self.image = image
         self.network = network
@@ -188,6 +189,7 @@ class CodexHarness:
             handoff_start = handoffs.begin(spec.episode, phase)
             trace = self._trace_path(run_root, spec.episode, phase)
             args = ["--proteus-trace", f"/records/{trace.name}",
+                    "-c", "features.code_mode_host=false",
                     "exec", "--json", "--sandbox", "workspace-write",
                     "--skip-git-repo-check", "--ephemeral", "-C", "/workspace"]
             chosen_model = spec.model or self.model
