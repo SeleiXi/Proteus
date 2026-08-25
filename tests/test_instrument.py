@@ -1055,6 +1055,20 @@ def test_overwrite_discards_stale_records(tmp_path):
     assert len(lines) == 1, "overwrite left stale progress lines"
 
 
+def test_overwrite_never_resumes_after_incomplete_cleanup(tmp_path, monkeypatch):
+    import proteus.sweep as sweep
+
+    root = tmp_path / "out"
+    sweep.run_sweep(_sweep_cfg(root))
+    monkeypatch.setattr(sweep.shutil, "rmtree", lambda _path: None)
+    try:
+        sweep.run_sweep(_sweep_cfg(root, on_existing="overwrite"))
+    except sweep.SweepStateError as exc:
+        assert "failed to remove" in str(exc)
+    else:
+        raise AssertionError("partial overwrite cleanup was mistaken for a resume")
+
+
 def test_task_workspace_lives_outside_the_snapshot(tmp_path, trusted_grader):
     import subprocess
     from proteus.adapters.minimal import MinimalHarness

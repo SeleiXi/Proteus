@@ -353,8 +353,15 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
         # as though they belong to the new condition.
         records_path.unlink(missing_ok=True)
         manifest_path.unlink(missing_ok=True)
-        shutil.rmtree(progress_path, ignore_errors=True)
-        shutil.rmtree(runs_path, ignore_errors=True)
+        for stale_tree in (progress_path, runs_path):
+            if stale_tree.exists():
+                # Never turn a partial cleanup into an accidental resume. In particular,
+                # root-owned container output must produce a clear overwrite failure.
+                shutil.rmtree(stale_tree)
+                if stale_tree.exists():
+                    raise SweepStateError(
+                        f"cannot overwrite {cfg.root}: failed to remove {stale_tree}"
+                    )
         has_state = False
 
     manifest = {

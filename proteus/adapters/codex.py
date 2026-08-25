@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -83,17 +84,25 @@ class CodexHarness:
         }
         from proteus.sandbox import DockerSandbox, SandboxConfig
         host_user = f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else ""
-        self.sandbox = sandbox or DockerSandbox(SandboxConfig(
-            network=network, image=image, user=host_user,
-            env_passthrough=tuple(self.proxy_env),
-        ))
+        if sandbox is None:
+            self.sandbox = DockerSandbox(SandboxConfig(
+                network=network, image=image, user=host_user,
+                env_passthrough=tuple(self.proxy_env),
+            ))
+        elif isinstance(sandbox, DockerSandbox) and host_user and not sandbox.config.user:
+            # A generic --env manifest normally omits user. Codex writes several
+            # persistent bind mounts, so preserve host ownership even through that path.
+            self.sandbox = DockerSandbox(replace(sandbox.config, user=host_user))
+        else:
+            self.sandbox = sandbox
         # Boundary compilation writes into the image's root-owned, prebuilt Cargo
         # target.  It therefore runs as container root, while all model-driven phases
         # keep running as the host uid/gid so candidate files remain host-owned.
-        self.build_sandbox = sandbox or DockerSandbox(SandboxConfig(
-            network=network, image=image,
-            env_passthrough=tuple(self.proxy_env),
-        ))
+        self.build_sandbox = (
+            DockerSandbox(replace(self.sandbox.config, user=""))
+            if isinstance(self.sandbox, DockerSandbox)
+            else self.sandbox
+        )
 
     def surfaces(self) -> Sequence[Surface]:
         return self.SURFACES

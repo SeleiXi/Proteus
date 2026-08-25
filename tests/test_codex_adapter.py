@@ -53,6 +53,20 @@ def test_codex_boundary_build_uses_root_but_agent_calls_use_host_user(tmp_path, 
     assert adapter.build_sandbox.config.user == ""
 
 
+def test_codex_env_sandbox_still_preserves_host_owned_candidate_files(tmp_path, monkeypatch):
+    from proteus.sandbox import DockerSandbox, SandboxConfig
+
+    monkeypatch.setattr(os, "getuid", lambda: 1234, raising=False)
+    monkeypatch.setattr(os, "getgid", lambda: 5678, raising=False)
+    supplied = DockerSandbox(SandboxConfig(image="custom", cpus="2"))
+    adapter = CodexHarness(auth_home=tmp_path, sandbox=supplied)
+
+    assert adapter.sandbox.config.image == "custom"
+    assert adapter.sandbox.config.cpus == "2"
+    assert adapter.sandbox.config.user == "1234:5678"
+    assert adapter.build_sandbox.config.user == ""
+
+
 def test_codex_boundary_timeout_allows_contended_release_builds():
     from proteus.adapters.codex import BOUNDARY_TIMEOUT_S
 
