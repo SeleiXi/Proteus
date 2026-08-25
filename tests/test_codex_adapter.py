@@ -42,7 +42,7 @@ def test_codex_boundary_build_reuses_disposable_image_cache():
     assert "CARGO_TARGET_DIR=/src/codex-rs/target" in boot
     assert "CARGO_TARGET_DIR=/state/cargo-target" not in boot
     assert "cp /src/codex-rs/target/release/codex" in boot
-    assert "chmod -R a+rwX /src" not in dockerfile
+    assert "chmod -R" not in dockerfile
 
 
 def test_codex_boundary_build_uses_root_but_agent_calls_use_host_user(tmp_path, monkeypatch):
