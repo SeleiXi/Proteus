@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -28,6 +29,15 @@ MANIFEST_FORMAT_VERSION = 2
 
 class SweepStateError(ValueError):
     """Existing sweep state cannot be safely reused."""
+
+
+def _remove_tree(path: Path) -> None:
+    """Remove experiment state, retrying host-owned read-only git objects on Windows."""
+    def make_writable_and_retry(func, target, _exc_info):
+        Path(target).chmod(Path(target).stat().st_mode | stat.S_IWUSR)
+        func(target)
+
+    shutil.rmtree(path, onerror=make_writable_and_retry)
 
 
 def _json_value(value: Any) -> Any:
@@ -357,7 +367,7 @@ def run_sweep(cfg: SweepConfig) -> list[dict]:
             if stale_tree.exists():
                 # Never turn a partial cleanup into an accidental resume. In particular,
                 # root-owned container output must produce a clear overwrite failure.
-                shutil.rmtree(stale_tree)
+                _remove_tree(stale_tree)
                 if stale_tree.exists():
                     raise SweepStateError(
                         f"cannot overwrite {cfg.root}: failed to remove {stale_tree}"

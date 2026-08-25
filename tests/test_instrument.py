@@ -1060,7 +1060,7 @@ def test_overwrite_never_resumes_after_incomplete_cleanup(tmp_path, monkeypatch)
 
     root = tmp_path / "out"
     sweep.run_sweep(_sweep_cfg(root))
-    monkeypatch.setattr(sweep.shutil, "rmtree", lambda _path: None)
+    monkeypatch.setattr(sweep, "_remove_tree", lambda _path: None)
     try:
         sweep.run_sweep(_sweep_cfg(root, on_existing="overwrite"))
     except sweep.SweepStateError as exc:
