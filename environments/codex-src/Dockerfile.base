@@ -14,6 +14,7 @@ RUN if [ -d codex-rs/target ]; then mv codex-rs/target /tmp/codex-target; fi \
 COPY . .
 ENV CARGO_BUILD_JOBS=1 CARGO_NET_GIT_FETCH_WITH_CLI=true \
     CARGO_PROFILE_RELEASE_LTO=false
-RUN cargo build --manifest-path codex-rs/Cargo.toml -p codex-cli \
-      --release --bin codex
+RUN cargo build --manifest-path codex-rs/Cargo.toml \
+      -p codex-cli --bin codex \
+      -p codex-code-mode-host --bin codex-code-mode-host --release
 ENTRYPOINT ["/src/codex-rs/target/release/codex"]
