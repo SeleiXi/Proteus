@@ -5,7 +5,7 @@ FROM rust:1.95-bookworm
 ARG CODEX_REF=a7b86b6201d35200280e3d24ca5ebccd8122d6ca
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git ca-certificates pkg-config libssl-dev libcap-dev clang cmake python3 jq rsync zstd \
+      git ca-certificates pkg-config libssl-dev libcap-dev clang cmake python3 jq rsync zstd curl \
     && rm -rf /var/lib/apt/lists/*
 
 # GitHub clones on some build hosts are flaky (TLS resets, mid-transfer EOF); retry
@@ -18,14 +18,39 @@ RUN for i in 1 2 3 4 5; do \
     && git checkout --detach "$CODEX_REF" \
     && git submodule update --init --recursive
 
-# Warm the exact Cargo dependency/build cache once in the image. Override
-# CARGO_BUILD_JOBS on memory-constrained build hosts (rustc's LTO codegen for the
-# largest crates can OOM at full `-j nproc` parallelism on small boxes).
+# codex-code-mode-host is a separate binary this Codex build routes ALL tool/shell
+# execution through - without it every tool call fails closed (verified: the agent
+# cannot run commands or edit files at all, only produce text), so it is not optional.
+# It links `v8`, whose crate build script fetches gn/ninja over a raw socket that
+# ignores http_proxy/https_proxy and 404s against upstream denoland/rusty_v8 for this
+# sandboxed variant/target combo besides. openai/codex publishes its own prebuilt
+# archive+binding for exactly this purpose (see codex-rs/../third_party/v8/README.md,
+# scripts/codex_package/v8.py) - fetch and checksum-verify those instead of building
+# V8 from source, and point Cargo at them via RUSTY_V8_ARCHIVE/RUSTY_V8_SRC_BINDING_PATH
+# so the crate's own downloader never runs.
+# Override CARGO_BUILD_JOBS on memory-constrained build hosts (rustc's LTO codegen for
+# the largest crates can OOM at full `-j nproc` parallelism on small boxes).
 ARG CARGO_BUILD_JOBS=
 RUN cd /opt/src/codex-rs \
-    && cargo fetch --locked \
+    && V8_VERSION=$(awk '/^name = "v8"$/{f=1} f && /^version = /{gsub(/"/,"",$3); print $3; exit}' Cargo.lock) \
+    && V8_TARGET=x86_64-unknown-linux-gnu \
+    && V8_PROFILE=ptrcomp_sandbox_release \
+    && V8_URL="https://github.com/openai/codex/releases/download/rusty-v8-v${V8_VERSION}" \
+    && V8_DIR=/opt/rusty-v8 && mkdir -p "$V8_DIR" \
+    && ARCHIVE="librusty_v8_${V8_PROFILE}_${V8_TARGET}.a.gz" \
+    && BINDING="src_binding_${V8_PROFILE}_${V8_TARGET}.rs" \
+    && CHECKSUMS="rusty_v8_${V8_PROFILE}_${V8_TARGET}.sha256" \
+    && curl -fsSL "$V8_URL/$CHECKSUMS" -o "$V8_DIR/$CHECKSUMS" \
+    && curl -fsSL "$V8_URL/$ARCHIVE" -o "$V8_DIR/$ARCHIVE" \
+    && curl -fsSL "$V8_URL/$BINDING" -o "$V8_DIR/$BINDING" \
+    && (cd "$V8_DIR" && sha256sum -c --ignore-missing "$CHECKSUMS") \
+    && cp "$V8_DIR/$ARCHIVE" /opt/rusty-v8-archive.a.gz \
+    && cp "$V8_DIR/$BINDING" /opt/rusty-v8-binding.rs \
+    && export RUSTY_V8_ARCHIVE="$V8_DIR/$ARCHIVE" RUSTY_V8_SRC_BINDING_PATH="$V8_DIR/$BINDING" \
     && if [ -n "$CARGO_BUILD_JOBS" ]; then export CARGO_BUILD_JOBS; fi \
-    && CARGO_TARGET_DIR=/opt/codex-target cargo build --locked -p codex-cli --release
+    && CARGO_TARGET_DIR=/opt/codex-target cargo fetch --locked \
+    && CARGO_TARGET_DIR=/opt/codex-target \
+       cargo build --locked -p codex-cli -p codex-code-mode-host --release
 
 # Seed tar is exactly the source used above; generated build state and .git are excluded.
 # The hash uses the same recipe as boot.sh's SOURCE_HASH so a first boot's freshly
@@ -35,7 +60,7 @@ RUN tar --exclude=.git --exclude=target -cf /opt/codex-source.tar -C /opt/src . 
     && (cd /opt/src && { find . -type f ! -path '*/.git/*' ! -path '*/target/*' -print0 | \
          sort -z | xargs -0 sha256sum; } | sha256sum | awk '{print $1}') > /opt/codex-source.sha256 \
     && chmod -R a+rX /opt/cargo-home-seed /opt/codex-target /opt/src /opt/codex-source.tar \
-                      /opt/codex-source.sha256
+                      /opt/codex-source.sha256 /opt/rusty-v8-archive.a.gz /opt/rusty-v8-binding.rs
 
 COPY boot.sh /usr/local/bin/proteus-codex
 RUN chmod +x /usr/local/bin/proteus-codex
