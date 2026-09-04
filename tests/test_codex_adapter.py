@@ -88,10 +88,25 @@ def test_boot_gate_is_offline_single_job_and_mtime_safe():
     boot = _joined(_repo_file("environments", "codex-src", "boot.sh"))
     assert "CARGO_NET_OFFLINE=true" in boot
     assert "CARGO_BUILD_JOBS" in boot
-    # updates compare content (--checksum) and never preserve timestamps: restoring an old
-    # snapshot with stale mtimes must not make Cargo treat changed files as fresh
-    assert "rsync -rlp --checksum --delete" in boot
-    assert "rsync -a --delete" in boot  # first materialization still preserves pristine times
+    assert "CARGO_HOME=/usr/local/cargo" in boot
+    # the changed candidate is overlaid onto the image-baked /opt/src by content
+    # (--checksum) with no timestamp trust, keeping Cargo fingerprints valid
+    assert "rsync -rlp --checksum --delete --exclude .git --exclude target" in boot
+    assert "/opt/src/" in boot
+    assert "rsync -a" not in boot
+    # only the validated binary pair is published to run-private state
+    assert "BIN_DIR" in boot
+    assert "codex-code-mode-host" in boot
+
+
+def test_boot_gate_runs_as_root_but_phases_do_not_install():
+    boot = _joined(_repo_file("environments", "codex-src", "boot.sh"))
+    assert "[ \"$(id -u)\" = 0 ]" in boot or 'id -u' in boot
+    assert "exit 95" in boot  # non-root container must not compile/install
+    codex = _joined(_repo_file("proteus", "adapters", "codex.py"))
+    assert "_boundary_sandbox" in codex
+    assert "self._boundary_sandbox().run(" in codex  # validation runs as container root
+    assert 'replace(self.sandbox.config, user="")' in codex
 
 
 def test_dockerfile_prewarms_test_profile_for_gate():

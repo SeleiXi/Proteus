@@ -6,19 +6,21 @@ an exact source tar at `/opt/codex-source.tar`. Each Proteus run extracts that t
 `harness/src/`.
 
 During an episode, the frozen active harness is mounted read-only at `/workspace` and the
-candidate is mounted at `/workspace/candidate`. `boot.sh` builds only the mounted source at
-`/workspace/src`; the resulting binary and Cargo target cache live under `/state`, outside
-the snapshotted harness. A failed candidate therefore cannot replace the active runtime.
+candidate is mounted at `/workspace/candidate`. Model-driven phases run as the host user and
+only *execute* the last validated Codex binaries, which live in the run-private
+`/state/bin/`. A failed candidate therefore cannot replace the active runtime.
 
-The candidate-boundary gate runs in two stages over an offline Cargo cache: first
-`cargo test --lib --no-run` for `codex-tui`/`codex-core`/`codex-cli` (a release build skips
-`#[cfg(test)]` code, so this is what catches a candidate whose test modules no longer
-compile), then the release build of `codex-cli` + `codex-code-mode-host`. Both profiles are
-prewarmed into the image's `/opt/codex-target`; the boot wrapper copies that cache to
-`/state` once per run root and recompiles only files whose contents actually changed
-(content checksums are compared, snapshot mtimes are not trusted). The adapter allows up to
-60 minutes for this boundary (`BOOT_TIMEOUT_S`); it only widens the wait, never the
-build-success condition.
+The candidate-boundary gate runs as **container root**: it overlays the changed source onto
+the image's baked `/opt/src` and compiles with the image's own Cargo home and target dir
+(`/usr/local/cargo`, `/opt/codex-target`) — the exact paths the image cache was built with —
+so Cargo's fingerprints stay valid and only files whose contents really changed recompile
+(overlay uses `rsync --checksum`; snapshot mtimes are never trusted). Two stages run over
+the offline cache: `cargo test --lib --no-run` for `codex-tui`/`codex-core`/`codex-cli` (a
+release build skips `#[cfg(test)]` code, so this catches candidates whose test modules no
+longer compile), then the release build of `codex-cli` + `codex-code-mode-host`. Only the
+validated binary pair is published (atomically) to `/state/bin/`, and the image and host are
+never modified. The adapter allows up to 60 minutes for this boundary (`BOOT_TIMEOUT_S`);
+it only widens the wait, never the build-success condition.
 
 Build:
 

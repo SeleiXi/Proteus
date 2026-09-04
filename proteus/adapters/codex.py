@@ -28,9 +28,9 @@ from proteus.core.disposition import Disposition
 IMAGE = os.environ.get("PROTEUS_CODEX_IMAGE", "proteus-env-codex-src:test-compile")
 PHASE_TIMEOUT_S = 900
 #: The candidate boundary compiles the changed Rust source twice (test profile, then
-#: release). On a shared host an incremental rebuild of the largest crates can take well
-#: over 30 minutes, so the boot gate is intentionally generous; the build-success
-#: condition itself is not relaxed.
+#: release) as container root against the image's baked Cargo cache, so it is normally
+#: incremental. The generous bound only widens the wait on slow/shared hosts; the
+#: build-success condition itself is not relaxed.
 BOOT_TIMEOUT_S = 3600
 SOURCE_TAR = "/opt/codex-source.tar"
 
@@ -149,11 +149,25 @@ class CodexHarness:
                 pass
         return target.exists() or bool(self.api_key)
 
+    def _boundary_sandbox(self):
+        """Sandbox for model-free boundary validation.
+
+        Boundary compilation overlays the changed source onto the image's baked /opt/src
+        and owns its root-owned Cargo cache (/usr/local/cargo, /opt/codex-target), so it
+        must run as container root; the model-driven phases keep the host uid/gid via
+        ``self.sandbox``. When a caller injected a non-Docker sandbox (tests), reuse it.
+        """
+        from dataclasses import replace
+        from proteus.sandbox import DockerSandbox
+        if isinstance(self.sandbox, DockerSandbox):
+            return DockerSandbox(replace(self.sandbox.config, user=""))
+        return self.sandbox
+
     def check_boot(self, harness_root: Path) -> str:
         harness = Path(harness_root).resolve()
         state = harness.parent / ".codex-state"
         state.mkdir(exist_ok=True)
-        proc = self.sandbox.run(
+        proc = self._boundary_sandbox().run(
             harness.parent, ["--version"], env={}, timeout_s=BOOT_TIMEOUT_S,
             mounts=((str(harness), "/workspace"), (str(state), "/state")),
         )
