@@ -47,7 +47,7 @@ RUN cd /opt/src/codex-rs \
     && cp "$V8_DIR/$ARCHIVE" /opt/rusty-v8-archive.a.gz \
     && cp "$V8_DIR/$BINDING" /opt/rusty-v8-binding.rs \
     && export RUSTY_V8_ARCHIVE="$V8_DIR/$ARCHIVE" RUSTY_V8_SRC_BINDING_PATH="$V8_DIR/$BINDING" \
-    && if [ -n "$CARGO_BUILD_JOBS" ]; then export CARGO_BUILD_JOBS; fi \
+    && export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}" \
     && CARGO_TARGET_DIR=/opt/codex-target cargo fetch --locked \
     && CARGO_TARGET_DIR=/opt/codex-target \
        cargo build --locked -p codex-cli -p codex-code-mode-host --release
