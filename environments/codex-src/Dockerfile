@@ -40,15 +40,22 @@ RUN cd /opt/src/codex-rs \
     && ARCHIVE="librusty_v8_${V8_PROFILE}_${V8_TARGET}.a.gz" \
     && BINDING="src_binding_${V8_PROFILE}_${V8_TARGET}.rs" \
     && CHECKSUMS="rusty_v8_${V8_PROFILE}_${V8_TARGET}.sha256" \
-    && curl -fsSL "$V8_URL/$CHECKSUMS" -o "$V8_DIR/$CHECKSUMS" \
-    && curl -fsSL "$V8_URL/$ARCHIVE" -o "$V8_DIR/$ARCHIVE" \
-    && curl -fsSL "$V8_URL/$BINDING" -o "$V8_DIR/$BINDING" \
+    && curl -fsSL --retry 8 --retry-all-errors --retry-delay 5 --connect-timeout 30 \
+          "$V8_URL/$CHECKSUMS" -o "$V8_DIR/$CHECKSUMS" \
+    && curl -fsSL --retry 8 --retry-all-errors --retry-delay 5 --connect-timeout 30 \
+          "$V8_URL/$ARCHIVE" -o "$V8_DIR/$ARCHIVE" \
+    && curl -fsSL --retry 8 --retry-all-errors --retry-delay 5 --connect-timeout 30 \
+          "$V8_URL/$BINDING" -o "$V8_DIR/$BINDING" \
     && (cd "$V8_DIR" && sha256sum -c --ignore-missing "$CHECKSUMS") \
     && cp "$V8_DIR/$ARCHIVE" /opt/rusty-v8-archive.a.gz \
     && cp "$V8_DIR/$BINDING" /opt/rusty-v8-binding.rs \
     && export RUSTY_V8_ARCHIVE="$V8_DIR/$ARCHIVE" RUSTY_V8_SRC_BINDING_PATH="$V8_DIR/$BINDING" \
     && export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}" \
-    && CARGO_TARGET_DIR=/opt/codex-target cargo fetch --locked \
+    && for i in 1 2 3 4 5; do \
+         if CARGO_TARGET_DIR=/opt/codex-target cargo fetch --locked; then FETCH_OK=1; break; fi; \
+         echo "fetch attempt $i failed, retrying..." >&2; sleep 10; \
+       done \
+    && [ -n "${FETCH_OK:-}" ] \
     && CARGO_TARGET_DIR=/opt/codex-target \
        cargo build --locked -p codex-cli -p codex-code-mode-host --release
 
