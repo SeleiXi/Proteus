@@ -11,10 +11,11 @@ IMG_CODEX=/opt/codex-target/release/codex
 IMG_HOST=/opt/codex-target/release/codex-code-mode-host
 PRIS_HASH=/opt/codex-source.sha256
 
-# /state is a run-private bind mount. The codex-home dir must stay writable by the
-# host-user model phases even when a root boundary boot created it first.
+# /state is a run-private bind mount. Both dirs must stay writable by the host-user model
+# phases even when a root boundary boot created them first: codex keeps runtime state
+# (auth refreshes, PATH aliases, app-server helpers) next to its binary and in CODEX_HOME.
 mkdir -p "$STATE" "$CODEX_HOME" "$BIN_DIR"
-chmod 777 "$CODEX_HOME" 2>/dev/null || true
+chmod 777 "$CODEX_HOME" "$BIN_DIR" 2>/dev/null || true
 
 if [ ! -d "$SOURCE/codex-rs" ]; then
   echo "Proteus Codex source surface missing: $SOURCE/codex-rs" >&2
