@@ -10,10 +10,20 @@ candidate is mounted at `/workspace/candidate`. `boot.sh` builds only the mounte
 `/workspace/src`; the resulting binary and Cargo target cache live under `/state`, outside
 the snapshotted harness. A failed candidate therefore cannot replace the active runtime.
 
+The candidate-boundary gate runs in two stages over an offline Cargo cache: first
+`cargo test --lib --no-run` for `codex-tui`/`codex-core`/`codex-cli` (a release build skips
+`#[cfg(test)]` code, so this is what catches a candidate whose test modules no longer
+compile), then the release build of `codex-cli` + `codex-code-mode-host`. Both profiles are
+prewarmed into the image's `/opt/codex-target`; the boot wrapper copies that cache to
+`/state` once per run root and recompiles only files whose contents actually changed
+(content checksums are compared, snapshot mtimes are not trusted). The adapter allows up to
+60 minutes for this boundary (`BOOT_TIMEOUT_S`); it only widens the wait, never the
+build-success condition.
+
 Build:
 
 ```bash
-docker build -t proteus-env-codex-src:main environments/codex-src
+docker build -t proteus-env-codex-src:test-compile environments/codex-src
 ```
 
 Authentication options:

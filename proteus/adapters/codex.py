@@ -25,9 +25,13 @@ from proteus.core.budget import PHASES, budget_plan, phase_prompt
 from proteus.core.continuity import CONTAINER_ROOT, HandoffStore
 from proteus.core.disposition import Disposition
 
-IMAGE = os.environ.get("PROTEUS_CODEX_IMAGE", "proteus-env-codex-src:main")
+IMAGE = os.environ.get("PROTEUS_CODEX_IMAGE", "proteus-env-codex-src:test-compile")
 PHASE_TIMEOUT_S = 900
-BOOT_TIMEOUT_S = 1800
+#: The candidate boundary compiles the changed Rust source twice (test profile, then
+#: release). On a shared host an incremental rebuild of the largest crates can take well
+#: over 30 minutes, so the boot gate is intentionally generous; the build-success
+#: condition itself is not relaxed.
+BOOT_TIMEOUT_S = 3600
 SOURCE_TAR = "/opt/codex-source.tar"
 
 SEED_INSTRUCTIONS = """\

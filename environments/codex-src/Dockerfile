@@ -52,6 +52,18 @@ RUN cd /opt/src/codex-rs \
     && CARGO_TARGET_DIR=/opt/codex-target \
        cargo build --locked -p codex-cli -p codex-code-mode-host --release
 
+# Prewarm the candidate gate's test profile. boot.sh runs the exact same `cargo test
+# --lib --no-run` (offline, against the /state copy of this target dir) before the release
+# build at every changed-candidate boundary, so the debug artifacts and dev-dependencies
+# for codex-tui/codex-core/codex-cli must already be baked here: network is available at
+# image build time but not at boot. Env/flags must stay identical to boot.sh's gate 1.
+RUN cd /opt/src/codex-rs \
+    && if [ -n "${CARGO_BUILD_JOBS:-}" ]; then export CARGO_BUILD_JOBS; else export CARGO_BUILD_JOBS=1; fi \
+    && export RUSTY_V8_ARCHIVE=/opt/rusty-v8-archive.a.gz \
+              RUSTY_V8_SRC_BINDING_PATH=/opt/rusty-v8-binding.rs \
+    && CARGO_TARGET_DIR=/opt/codex-target \
+       cargo test --locked -p codex-tui -p codex-core -p codex-cli --lib --no-run
+
 # Seed tar is exactly the source used above; generated build state and .git are excluded.
 # The hash uses the same recipe as boot.sh's SOURCE_HASH so a first boot's freshly
 # extracted /workspace/src hashes identically and can reuse /opt/codex-target as-is.
