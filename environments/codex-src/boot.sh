@@ -13,9 +13,13 @@ PRIS_HASH=/opt/codex-source.sha256
 
 # /state is a run-private bind mount. Both dirs must stay writable by the host-user model
 # phases even when a root boundary boot created them first: codex keeps runtime state
-# (auth refreshes, PATH aliases, app-server helpers) next to its binary and in CODEX_HOME.
+# (auth refreshes, PATH aliases, in-process app-server helpers) next to its binary, under
+# CODEX_HOME, and under $HOME (the container default HOME=/root is not writable by the
+# host-user phases and makes codex fail with EACCES during app-server init).
 mkdir -p "$STATE" "$CODEX_HOME" "$BIN_DIR"
 chmod 777 "$CODEX_HOME" "$BIN_DIR" 2>/dev/null || true
+export HOME="$CODEX_HOME"
+export CODEX_HOME="$STATE/codex-home"
 
 if [ ! -d "$SOURCE/codex-rs" ]; then
   echo "Proteus Codex source surface missing: $SOURCE/codex-rs" >&2
